@@ -6,6 +6,13 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import logging
 import datetime
 
+# Configuration
+NUM_SAMPLES = 10  # Number of samples to test from each category
+MODEL_PATH = "reddit_topic_classifier.pt"
+IRRELEVANT_FOLDER = "irrelevant_posts"
+RELEVANT_FOLDER = "relevant_posts"
+OUTPUT_DIR = "model_test_results"
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -91,26 +98,19 @@ def get_random_samples(folder_path, num_samples=5):
     return samples
 
 def main():
-    # Paths
-    model_path = "reddit_topic_classifier.pt"
-    irrelevant_folder = "irrelevant_posts"
-    relevant_folder = "relevant_posts"
-    
     # Create output directory if it doesn't exist
-    output_dir = "model_test_results"
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Generate output filename with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = os.path.join(output_dir, f"model_test_results_{timestamp}.txt")
+    output_file = os.path.join(OUTPUT_DIR, f"model_test_results_{timestamp}.txt")
     
     # Load model
-    model, tokenizer, device = load_model(model_path)
+    model, tokenizer, device = load_model(MODEL_PATH)
     
     # Get random samples
-    num_samples = 5
-    irrelevant_samples = get_random_samples(irrelevant_folder, num_samples)
-    relevant_samples = get_random_samples(relevant_folder, num_samples)
+    irrelevant_samples = get_random_samples(IRRELEVANT_FOLDER, NUM_SAMPLES)
+    relevant_samples = get_random_samples(RELEVANT_FOLDER, NUM_SAMPLES)
     
     # Open output file
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -121,7 +121,7 @@ def main():
         
         # Test irrelevant samples
         f.write("="*80 + "\n")
-        f.write(f"TESTING {num_samples} RANDOM IRRELEVANT SAMPLES\n")
+        f.write(f"TESTING {NUM_SAMPLES} RANDOM IRRELEVANT SAMPLES\n")
         f.write("="*80 + "\n\n")
         
         for sample in irrelevant_samples:
@@ -140,7 +140,7 @@ def main():
         
         # Test relevant samples
         f.write("="*80 + "\n")
-        f.write(f"TESTING {num_samples} RANDOM RELEVANT SAMPLES\n")
+        f.write(f"TESTING {NUM_SAMPLES} RANDOM RELEVANT SAMPLES\n")
         f.write("="*80 + "\n\n")
         
         for sample in relevant_samples:
