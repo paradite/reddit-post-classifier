@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -98,8 +98,15 @@ class RedditDataset(Dataset):
             'labels': torch.tensor(label, dtype=torch.long)
         }
 
-# Training function
-def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-classifier"):
+# Function to calculate class weights
+def calculate_class_weights(labels):
+    class_counts = np.bincount(labels)
+    total_samples = len(labels)
+    class_weights = total_samples / (len(class_counts) * class_counts)
+    return torch.tensor(class_weights, dtype=torch.float)
+
+# Training function with early stopping
+def train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3, project_name="reddit-classifier"):
     # Initialize wandb
     wandb.init(project=project_name, config={
         "model_name": model_name,
@@ -108,7 +115,9 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
         "learning_rate": 2e-5,
         "device": str(device),
         "train_size": len(train_loader.dataset),
-        "val_size": len(val_loader.dataset)
+        "val_size": len(val_loader.dataset),
+        "class_weights": class_weights.tolist(),
+        "patience": patience
     })
     
     # Log model architecture
@@ -118,6 +127,11 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1)
     
     best_val_accuracy = 0.0
+    best_epoch = 0
+    patience_counter = 0
+    
+    # Move class weights to device
+    class_weights = class_weights.to(device)
     
     for epoch in range(epochs):
         epoch_start_time = time.time()
@@ -138,17 +152,21 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
             attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
             
+            # Calculate weighted loss
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 labels=labels
             )
             
-            loss = outputs.loss
+            # Apply class weights to loss
+            loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
+            logits = outputs.logits
+            loss = loss_fct(logits, labels)
+            
             train_loss += loss.item()
             
             # Calculate accuracy
-            logits = outputs.logits
             preds = torch.argmax(logits, dim=1)
             train_correct += (preds == labels).sum().item()
             train_total += labels.size(0)
@@ -193,8 +211,12 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
                 labels=labels
             )
             
-            val_loss += outputs.loss.item()
+            # Apply class weights to validation loss
+            loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
             logits = outputs.logits
+            loss = loss_fct(logits, labels)
+            
+            val_loss += loss.item()
             preds = torch.argmax(logits, dim=1).cpu().numpy()
             
             val_preds.extend(preds)
@@ -202,7 +224,7 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
             
             # Print validation progress
             if (batch_idx + 1) % 10 == 0:
-                logger.info(f"Validation batch {batch_idx + 1}/{len(val_loader)} - Loss: {outputs.loss.item():.4f}")
+                logger.info(f"Validation batch {batch_idx + 1}/{len(val_loader)} - Loss: {loss.item():.4f}")
         
         accuracy = accuracy_score(val_true, val_preds)
         avg_val_loss = val_loss / len(val_loader)
@@ -223,12 +245,22 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
             "epoch_time": time.time() - epoch_start_time
         })
         
-        # Save best model
+        # Early stopping check
         if accuracy > best_val_accuracy:
             best_val_accuracy = accuracy
+            best_epoch = epoch
+            patience_counter = 0
             logger.info(f"New best model with validation accuracy: {best_val_accuracy:.4f}")
             torch.save(model.state_dict(), f"best_model_epoch_{epoch+1}.pt")
             wandb.save(f"best_model_epoch_{epoch+1}.pt")
+        else:
+            patience_counter += 1
+            logger.info(f"No improvement for {patience_counter} epochs. Best accuracy: {best_val_accuracy:.4f}")
+            
+            # Early stopping
+            if patience_counter >= patience:
+                logger.info(f"Early stopping triggered after {epoch+1} epochs. Best epoch was {best_epoch+1} with accuracy {best_val_accuracy:.4f}")
+                break
     
     wandb.finish()
     return model
@@ -314,18 +346,28 @@ def main():
     logger.info(f"Training set: {len(train_texts)} posts")
     logger.info(f"Validation set: {len(val_texts)} posts")
     
+    # Calculate class weights
+    class_weights = calculate_class_weights(train_labels)
+    logger.info(f"Class weights: {class_weights.tolist()}")
+    
     # Create datasets
     train_dataset = RedditDataset(train_texts, train_labels, tokenizer)
     val_dataset = RedditDataset(val_texts, val_labels, tokenizer)
     
+    # Create weighted sampler for training
+    class_counts = np.bincount(train_labels)
+    weights = 1. / class_counts
+    sample_weights = [float(w) for w in weights[train_labels]]  # Convert to list of floats
+    sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+    
     # Create dataloaders
     batch_size = 8
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
     
-    # Train model
+    # Train model with increased epochs and early stopping
     logger.info("Starting training...")
-    trained_model = train_model(model, train_loader, val_loader, epochs=3)
+    trained_model = train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3)
     
     # Save model
     model_save_path = "reddit_topic_classifier.pt"
