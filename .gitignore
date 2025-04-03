@@ -13,3 +13,6 @@ wheels/
 irrelevant_posts/*.txt
 relevant_posts/*.txt
 *.csv
+
+# wandb
+wandb/
