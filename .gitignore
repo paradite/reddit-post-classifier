@@ -16,3 +16,9 @@ relevant_posts/*.txt
 
 # wandb
 wandb/
+
+# model
+*.pt
+
+# output
+model_test_results/*.txt
