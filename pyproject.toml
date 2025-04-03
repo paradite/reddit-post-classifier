@@ -9,4 +9,5 @@ dependencies = [
     "transformers>=4.28.0",
     "pandas>=1.5.0",
     "scikit-learn>=1.0.0",
+    "wandb>=0.19.9",
 ]
