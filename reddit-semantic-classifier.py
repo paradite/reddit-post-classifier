@@ -115,7 +115,7 @@ def train_model(model, train_loader, val_loader, epochs=3, project_name="reddit-
     wandb.watch(model, log="all")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1, verbose="True")
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1)
     
     best_val_accuracy = 0.0
     
