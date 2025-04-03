@@ -11,6 +11,14 @@ import wandb
 import time
 import logging
 
+# Define label constants
+IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
+RELEVANT_LABEL = 1    # Posts that are relevant to the topic
+LABEL_NAMES = {
+    IRRELEVANT_LABEL: "irrelevant",
+    RELEVANT_LABEL: "relevant"
+}
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -44,7 +52,7 @@ def load_posts_from_folders(relevant_folder, irrelevant_folder):
                 content = file.read().strip()
                 if content:  # Make sure we don't add empty posts
                     posts.append(content)
-                    labels.append(1)  # 1 for relevant
+                    labels.append(RELEVANT_LABEL)  # 1 for relevant
         except Exception as e:
             logger.error(f"Error reading {filepath}: {e}")
     
@@ -56,13 +64,13 @@ def load_posts_from_folders(relevant_folder, irrelevant_folder):
                 content = file.read().strip()
                 if content:  # Make sure we don't add empty posts
                     posts.append(content)
-                    labels.append(0)  # 0 for irrelevant
+                    labels.append(IRRELEVANT_LABEL)  # 0 for irrelevant
         except Exception as e:
             logger.error(f"Error reading {filepath}: {e}")
     
     logger.info(f"Loaded {len(posts)} posts in total:")
-    logger.info(f"- {labels.count(1)} relevant posts")
-    logger.info(f"- {labels.count(0)} irrelevant posts")
+    logger.info(f"- {labels.count(RELEVANT_LABEL)} relevant posts")
+    logger.info(f"- {labels.count(IRRELEVANT_LABEL)} irrelevant posts")
     
     return posts, labels
 
@@ -230,10 +238,22 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
         avg_val_loss = val_loss / len(val_loader)
         logger.info(f"Validation - Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}")
         logger.info("\nClassification Report:\n")
+        report = classification_report(val_true, val_preds, output_dict=True)
         logger.info(classification_report(val_true, val_preds))
         
         # Update learning rate scheduler
         scheduler.step(accuracy)
+        
+        # Helper function to safely get metric value
+        def get_metric(label, metric_name, default=0.0):
+            if not isinstance(report, dict):
+                return default
+            label_str = str(label)
+            if label_str not in report:
+                return default
+            if metric_name not in report[label_str]:
+                return default
+            return report[label_str][metric_name]
         
         # Log epoch metrics to wandb
         wandb.log({
@@ -242,7 +262,13 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             "train_accuracy": train_accuracy,
             "val_loss": avg_val_loss,
             "val_accuracy": accuracy,
-            "epoch_time": time.time() - epoch_start_time
+            "epoch_time": time.time() - epoch_start_time,
+            f"{LABEL_NAMES[IRRELEVANT_LABEL]}_precision": get_metric(IRRELEVANT_LABEL, "precision"),
+            f"{LABEL_NAMES[IRRELEVANT_LABEL]}_recall": get_metric(IRRELEVANT_LABEL, "recall"),
+            f"{LABEL_NAMES[IRRELEVANT_LABEL]}_f1": get_metric(IRRELEVANT_LABEL, "f1-score"),
+            f"{LABEL_NAMES[RELEVANT_LABEL]}_precision": get_metric(RELEVANT_LABEL, "precision"),
+            f"{LABEL_NAMES[RELEVANT_LABEL]}_recall": get_metric(RELEVANT_LABEL, "recall"),
+            f"{LABEL_NAMES[RELEVANT_LABEL]}_f1": get_metric(RELEVANT_LABEL, "f1-score")
         })
         
         # Early stopping check
@@ -295,7 +321,7 @@ def predict_relevance(new_posts, model, tokenizer, device):
         
         predictions.append({
             'post': post[:100] + "..." if len(post) > 100 else post,  # Truncate for display
-            'relevant': bool(prediction),
+            'relevant': bool(prediction == RELEVANT_LABEL),
             'confidence': float(confidence)
         })
         
