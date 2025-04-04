@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reddit-classifier-api
+    ports:
+      - "8080:8080"
+    restart: unless-stopped 

@@ -43,7 +43,25 @@ weighted avg       0.96      0.93      0.94      1487
 
 ## Running the API Server
 
-### Using Docker (Recommended)
+### Using Docker Compose (Recommended)
+
+The easiest way to run the service is using Docker Compose. The service will run in a container named `reddit-classifier-api`:
+
+```bash
+# Start the service
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop the service
+docker compose down
+
+# View container logs directly (using container name)
+docker logs -f reddit-classifier-api
+```
+
+### Using Docker
 
 Build the Docker image:
 
