@@ -40,3 +40,27 @@ b894522593fdae0422b3c0c2a4ac9c8dd30f2bf3
    macro avg       0.62      0.72      0.65      1487
 weighted avg       0.96      0.93      0.94      1487
 ```
+
+## API Request
+
+Run the API server
+
+```bash
+python api-server.py
+```
+
+Make a request to the API
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"content":"Your reddit post content goes here."}' \
+  http://localhost:8080
+
+# {"relevant": false, "confidence": 0.9925305247306824}
+
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"content":"putting the question into a file, scheduling the launch, open project, paste the question and have Claude write the answer in a file"}' \
+  http://localhost:8080
+
+# {"relevant": true, "confidence": 0.6180585026741028}
+```
