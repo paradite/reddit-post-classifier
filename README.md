@@ -4,6 +4,12 @@ This project is a simple classifier for Reddit posts. It uses a pre-trained mode
 
 Created by [16x Tracker](https://tracker.16x.engineer/)
 
+## System Requirements
+
+- Minimum 1GB RAM (2GB recommended)
+- Docker and Docker Compose installed
+- About 500MB disk space for the model and dependencies
+
 ## Results
 
 ### polar-wave-5
