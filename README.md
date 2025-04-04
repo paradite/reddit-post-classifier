@@ -41,15 +41,33 @@ b894522593fdae0422b3c0c2a4ac9c8dd30f2bf3
 weighted avg       0.96      0.93      0.94      1487
 ```
 
-## API Request
+## Running the API Server
 
-Run the API server
+### Using Docker (Recommended)
+
+Build the Docker image:
+
+```bash
+docker build -t reddit-post-classifier .
+```
+
+Run the container:
+
+```bash
+docker run -p 8080:8080 reddit-post-classifier
+```
+
+### Without Docker
+
+Run the API server directly:
 
 ```bash
 python api-server.py
 ```
 
-Make a request to the API
+## Making API Requests
+
+Make a request to the API:
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
