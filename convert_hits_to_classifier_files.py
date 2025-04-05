@@ -26,6 +26,10 @@ def process_hits_csv(csv_path, chunk_size=1000):
     irrelevant_count = 0
     f5bot_filtered_count = 0
     
+    # Track unique content hashes
+    seen_hashes = set()
+    duplicate_hashes = set()
+    
     # Process the CSV file in chunks
     for chunk in pd.read_csv(csv_path, chunksize=chunk_size):
         for _, row in chunk.iterrows():
@@ -46,29 +50,38 @@ def process_hits_csv(csv_path, chunk_size=1000):
             # Create a filename based on the content hash
             content_hash = get_content_hash(content)
             
-            # Ensure filename has .txt suffix
-            final_filename = f"{content_hash}.txt"
-            
-            # Determine output directory
-            output_dir = relevant_dir if is_relevant else irrelevant_dir
-            
-            # Write content to file
-            output_path = os.path.join(output_dir, final_filename)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # Update counters
-            total_processed += 1
-            if is_relevant:
-                relevant_count += 1
+            # Check for duplicates
+            if content_hash in seen_hashes:
+                duplicate_hashes.add(content_hash)
             else:
-                irrelevant_count += 1
+                seen_hashes.add(content_hash)
+                
+                # Ensure filename has .txt suffix
+                final_filename = f"{content_hash}.txt"
+                
+                # Determine output directory
+                output_dir = relevant_dir if is_relevant else irrelevant_dir
+                
+                # Write content to file
+                output_path = os.path.join(output_dir, final_filename)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                # Update counters
+                if is_relevant:
+                    relevant_count += 1
+                else:
+                    irrelevant_count += 1
+            
+            total_processed += 1
         
         # Print progress
         print(f"Processed {total_processed} entries so far...")
     
     print(f"Processing complete!")
     print(f"Total entries processed: {total_processed}")
+    print(f"Unique entries: {len(seen_hashes)}")
+    print(f"Duplicate entries: {len(duplicate_hashes)}")
     print(f"Relevant entries: {relevant_count}")
     print(f"Irrelevant entries: {irrelevant_count}")
     print(f"F5Bot filtered entries: {f5bot_filtered_count}")

@@ -18,10 +18,11 @@ Pre-processing
 
 ```
 Total entries processed: 19686
-Relevant entries: 252
-Irrelevant entries: 19434
+Unique entries: 7417
+Duplicate entries: 2128
+Relevant entries: 237
+Irrelevant entries: 7180
 F5Bot filtered entries: 34
-Files saved to 'relevant_posts' and 'irrelevant_posts' directories with .txt suffix
 ```
 
 Model Results
