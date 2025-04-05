@@ -91,7 +91,9 @@ python api-server.py
 
 ## Making API Requests
 
-Make a request to the API:
+### Single Post Classification
+
+Make a request to classify a single post:
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
@@ -106,3 +108,27 @@ curl -X POST -H "Content-Type: application/json" \
 
 # {"relevant": true, "confidence": 0.6180585026741028}
 ```
+
+### Bulk Post Classification
+
+You can also classify multiple posts at once (up to 10 posts per request):
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"contents": [
+    "Your first reddit post content goes here.",
+    "Your second reddit post content goes here.",
+    "Your third reddit post content goes here."
+  ]}' \
+  http://localhost:8080
+
+# {
+#   "results": [
+#     {"relevant": false, "confidence": 0.9925305247306824},
+#     {"relevant": true, "confidence": 0.6180585026741028},
+#     {"relevant": false, "confidence": 0.9876543210987654}
+#   ]
+# }
+```
+
+If you submit more than 10 posts, the API will return a 400 error with a message indicating the maximum batch size has been exceeded.

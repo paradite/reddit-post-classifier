@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import logging
+import time
 
 # Set up logging
 logging.basicConfig(
@@ -14,6 +15,7 @@ logging.basicConfig(
 
 # Constants
 MODEL_PATH = "reddit_topic_classifier.pt"
+MAX_BATCH_SIZE = 10
 
 # Load model
 logging.info("Loading model and tokenizer...")
@@ -27,45 +29,81 @@ model.eval()
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        start_time = time.time()
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
         try:
             data = json.loads(post_data.decode('utf-8'))
-            text = data.get('content', '')
-            logging.info(f"Received request with text length: {len(text)}")
-        except:
-            logging.error("Failed to parse request data")
+            
+            # Handle both single content and bulk content
+            if 'content' in data:
+                # Single content request (backward compatibility)
+                texts = [data.get('content', '')]
+            elif 'contents' in data:
+                # Bulk content request
+                texts = data.get('contents', [])
+                if not isinstance(texts, list):
+                    raise ValueError("'contents' must be a list")
+                if len(texts) > MAX_BATCH_SIZE:
+                    error_msg = f"Request exceeded maximum batch size of {MAX_BATCH_SIZE}. Received {len(texts)} items."
+                    logging.error(error_msg)
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": error_msg}).encode('utf-8'))
+                    return
+            else:
+                raise ValueError("Request must contain either 'content' or 'contents' field")
+                
+            logging.info(f"Received request with {len(texts)} text(s)")
+        except Exception as e:
+            logging.error(f"Failed to parse request data: {str(e)}")
             self.send_response(400)
             self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             return
 
-        encoding = tokenizer(
-            text,
-            add_special_tokens=True,
-            max_length=512,
-            return_token_type_ids=False,
-            padding='max_length',
-            truncation=True,
-            return_attention_mask=True,
-            return_tensors='pt'
-        )
-        input_ids = torch.tensor(encoding['input_ids']).to(device)
-        attention_mask = torch.tensor(encoding['attention_mask']).to(device)
+        results = []
+        for i, text in enumerate(texts):
+            text_start_time = time.time()
+            encoding = tokenizer(
+                text,
+                add_special_tokens=True,
+                max_length=512,
+                return_token_type_ids=False,
+                padding='max_length',
+                truncation=True,
+                return_attention_mask=True,
+                return_tensors='pt'
+            )
+            input_ids = torch.tensor(encoding['input_ids']).to(device)
+            attention_mask = torch.tensor(encoding['attention_mask']).to(device)
 
-        with torch.no_grad():
-            output = model(input_ids=input_ids, attention_mask=attention_mask)
-            logits = output.logits
-            probs = torch.softmax(logits, dim=1)
-            pred = int(torch.argmax(probs, dim=1).item())
-            conf = probs[0][pred].item()
+            with torch.no_grad():
+                output = model(input_ids=input_ids, attention_mask=attention_mask)
+                logits = output.logits
+                probs = torch.softmax(logits, dim=1)
+                pred = int(torch.argmax(probs, dim=1).item())
+                conf = probs[0][pred].item()
 
-        response = {'relevant': bool(pred == 1), 'confidence': float(conf)}
-        logging.info(f"Prediction: {'relevant' if pred == 1 else 'not relevant'} (confidence: {conf:.2f})")
+            result = {'relevant': bool(pred == 1), 'confidence': float(conf)}
+            results.append(result)
+            text_time = time.time() - text_start_time
+            logging.info(f"Text {i+1}/{len(texts)}: {'relevant' if pred == 1 else 'not relevant'} (confidence: {conf:.2f}, time: {text_time:.3f}s)")
+
+        # For backward compatibility, if it was a single content request, return the same format
+        if 'content' in data:
+            response = results[0]
+        else:
+            response = {'results': results}
 
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(response).encode('utf-8'))
+        
+        total_time = time.time() - start_time
+        logging.info(f"Request completed in {total_time:.3f}s")
 
 def run():
     server_address = ('0.0.0.0', 8080)
