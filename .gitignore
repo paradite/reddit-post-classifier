@@ -12,6 +12,8 @@ wheels/
 # data
 irrelevant_posts/*.txt
 relevant_posts/*.txt
+new_posts/*.txt
+content_removed_posts/*.txt
 *.csv
 
 # wandb

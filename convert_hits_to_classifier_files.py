@@ -1,30 +1,39 @@
 import pandas as pd
 import os
 import hashlib
+from collections import Counter
 
 def get_content_hash(content):
     """Generate a hash from the content."""
     return hashlib.md5(content.encode('utf-8')).hexdigest()[:10]
 
-def process_hits_csv(csv_path, chunk_size=1000):
+def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
     """
     Process the hits.csv file in chunks and create individual text files.
     
     Args:
         csv_path: Path to the hits.csv file
+        team_id_filter: Optional team ID to filter by. If None, process all teams.
         chunk_size: Number of rows to process at once
     """
-    # Create output directories at the same level
-    relevant_dir = "relevant_posts"
-    irrelevant_dir = "irrelevant_posts"
-    os.makedirs(relevant_dir, exist_ok=True)
-    os.makedirs(irrelevant_dir, exist_ok=True)
+    # Create output directories for each status
+    status_dirs = {
+        'RELEVANT': 'relevant_posts',
+        'REPLIED': 'relevant_posts',  # Same as RELEVANT
+        'IGNORED': 'irrelevant_posts',  # Map to irrelevant_posts
+        'NEW': 'new_posts',
+        'CONTENT_REMOVED': 'content_removed_posts'
+    }
+    
+    # Create all directories
+    for dir_path in set(status_dirs.values()):
+        os.makedirs(dir_path, exist_ok=True)
     
     # Initialize counters
     total_processed = 0
-    relevant_count = 0
-    irrelevant_count = 0
+    status_counts = {status: 0 for status in status_dirs.keys()}
     f5bot_filtered_count = 0
+    team_filtered_count = 0
     
     # Track unique content hashes
     seen_hashes = set()
@@ -37,16 +46,23 @@ def process_hits_csv(csv_path, chunk_size=1000):
             if pd.isna(row.get('content')) or not row.get('content'):
                 continue
             
+            # Filter by team ID if specified
+            team_id = row.get('team_id', 'unknown')
+            if team_id_filter is not None and team_id != team_id_filter:
+                team_filtered_count += 1
+                continue
+            
             # Filter out posts containing "F5Bot"
             content = str(row.get('content', ''))
             if "F5Bot" in content:
                 f5bot_filtered_count += 1
                 continue
                 
-            # Determine if the content is relevant (both REPLIED and RELEVANT are considered relevant)
+            # Get the status
             status = row.get('status', '')
-            is_relevant = status in ['RELEVANT', 'REPLIED']
-            
+            if status not in status_dirs:
+                continue  # Skip unknown statuses
+                
             # Create a filename based on the content hash
             content_hash = get_content_hash(content)
             
@@ -60,18 +76,15 @@ def process_hits_csv(csv_path, chunk_size=1000):
                 final_filename = f"{content_hash}.txt"
                 
                 # Determine output directory
-                output_dir = relevant_dir if is_relevant else irrelevant_dir
+                output_dir = status_dirs[status]
                 
                 # Write content to file
                 output_path = os.path.join(output_dir, final_filename)
                 with open(output_path, 'w', encoding='utf-8') as f:
                     f.write(content)
                 
-                # Update counters
-                if is_relevant:
-                    relevant_count += 1
-                else:
-                    irrelevant_count += 1
+                # Update status counter
+                status_counts[status] += 1
             
             total_processed += 1
         
@@ -82,15 +95,31 @@ def process_hits_csv(csv_path, chunk_size=1000):
     print(f"Total entries processed: {total_processed}")
     print(f"Unique entries: {len(seen_hashes)}")
     print(f"Duplicate entries: {len(duplicate_hashes)}")
-    print(f"Relevant entries: {relevant_count}")
-    print(f"Irrelevant entries: {irrelevant_count}")
     print(f"F5Bot filtered entries: {f5bot_filtered_count}")
-    print(f"Files saved to '{relevant_dir}' and '{irrelevant_dir}' directories with .txt suffix")
+    if team_id_filter is not None:
+        print(f"Team ID filtered entries (not team {team_id_filter}): {team_filtered_count}")
+    
+    print("\nStatus breakdown:")
+    # Group RELEVANT and REPLIED
+    relevant_count = status_counts['RELEVANT'] + status_counts['REPLIED']
+    print(f"RELEVANT/REPLIED: {relevant_count}")
+    
+    # Print other statuses
+    for status, count in status_counts.items():
+        if status not in ['RELEVANT', 'REPLIED']:
+            print(f"{status}: {count}")
+    
+    print(f"\nFiles saved to the following directories:")
+    for status, dir_path in status_dirs.items():
+        print(f"- {dir_path} ({status})")
 
 if __name__ == "__main__":
     # Path to CSV file
     # csv_path = "hits.csv"
     csv_path = "tracking_hits_rows.csv"
     
+    # Team ID to filter by (set to None to process all teams)
+    team_id_filter = 1
+    
     # Process the CSV file
-    process_hits_csv(csv_path) 
+    process_hits_csv(csv_path, team_id_filter=team_id_filter) 
