@@ -17,12 +17,17 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 Pre-processing
 
 ```
-Total entries processed: 19686
-Unique entries: 7417
-Duplicate entries: 2128
-Relevant entries: 237
-Irrelevant entries: 7180
-F5Bot filtered entries: 34
+Total entries processed: 9353
+Unique entries: 4549
+Duplicate entries: 1191
+F5Bot filtered entries: 8
+Team ID filtered entries (not team 1): 10359
+
+Status breakdown:
+RELEVANT/REPLIED: 241
+IGNORED: 4246
+NEW: 3
+CONTENT_REMOVED: 59
 ```
 
 Model Results
