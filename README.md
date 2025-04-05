@@ -54,16 +54,16 @@ weighted avg       0.96      0.93      0.94      1487
 The easiest way to run the service is using Docker Compose. The service will run in a container named `reddit-classifier-api`:
 
 ```bash
-# Start the service
-docker compose up -d
+# pull latest changes from repo, rebuild the image and start the service
+git pull && docker compose up --build
 
-# View logs
+# view logs
 docker compose logs -f
 
 # Stop the service
 docker compose down
 
-# View container logs directly (using container name)
+# view container logs directly (using container name)
 docker logs -f reddit-classifier-api
 ```
 
