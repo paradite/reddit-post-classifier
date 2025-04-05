@@ -12,7 +12,19 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 - Docker and Docker Compose installed
 - About 500MB disk space for the model and dependencies
 
-## SampleResults
+## Sample Results
+
+Pre-processing
+
+```
+Total entries processed: 19686
+Relevant entries: 252
+Irrelevant entries: 19434
+F5Bot filtered entries: 34
+Files saved to 'relevant_posts' and 'irrelevant_posts' directories with .txt suffix
+```
+
+Model Results
 
 ```
                precision    recall  f1-score   support
