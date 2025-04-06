@@ -51,7 +51,7 @@ The easiest way to run the service is using Docker Compose. The service will run
 
 ```bash
 # pull latest changes from repo, rebuild the image and start the service
-git pull && docker compose up --build
+git pull && docker compose up --build -d
 
 # view logs
 docker compose logs -f
