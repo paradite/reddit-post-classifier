@@ -11,6 +11,9 @@ import wandb
 import time
 import logging
 
+# Global run number for tracking different training runs
+RUN_NUMBER = 3  # Increment this for each new training run
+
 # Define label constants
 IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
 RELEVANT_LABEL = 1    # Posts that are relevant to the topic
@@ -125,7 +128,8 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
         "train_size": len(train_loader.dataset),
         "val_size": len(val_loader.dataset),
         "class_weights": class_weights.tolist(),
-        "patience": patience
+        "patience": patience,
+        "run_number": RUN_NUMBER
     })
     
     # Log model architecture
@@ -277,8 +281,8 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             best_epoch = epoch
             patience_counter = 0
             logger.info(f"New best model with validation accuracy: {best_val_accuracy:.4f}")
-            torch.save(model.state_dict(), f"best_model_epoch_{epoch+1}.pt")
-            wandb.save(f"best_model_epoch_{epoch+1}.pt")
+            torch.save(model.state_dict(), f"best_model_run{RUN_NUMBER}_epoch_{epoch+1}.pt")
+            wandb.save(f"best_model_run{RUN_NUMBER}_epoch_{epoch+1}.pt")
         else:
             patience_counter += 1
             logger.info(f"No improvement for {patience_counter} epochs. Best accuracy: {best_val_accuracy:.4f}")
@@ -396,7 +400,7 @@ def main():
     trained_model = train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3)
     
     # Save model
-    model_save_path = "reddit_topic_classifier_3.pt"
+    model_save_path = f"reddit_topic_classifier_run{RUN_NUMBER}.pt"
     torch.save(trained_model.state_dict(), model_save_path)
     logger.info(f"Model saved to {model_save_path}")
     
