@@ -2,12 +2,13 @@ import pandas as pd
 import os
 import hashlib
 from collections import Counter
+from datetime import datetime, timedelta
 
 def get_content_hash(content):
     """Generate a hash from the content."""
     return hashlib.md5(content.encode('utf-8')).hexdigest()[:10]
 
-def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
+def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_threshold_days=None):
     """
     Process the hits.csv file in chunks and create individual text files.
     
@@ -15,6 +16,7 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
         csv_path: Path to the hits.csv file
         team_id_filter: Optional team ID to filter by. If None, process all teams.
         chunk_size: Number of rows to process at once
+        timestamp_threshold_days: Optional number of days to filter by. If None, process all timestamps.
     """
     # Create output directories for each status
     status_dirs = {
@@ -34,6 +36,13 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
     status_counts = {status: 0 for status in status_dirs.keys()}
     f5bot_filtered_count = 0
     team_filtered_count = 0
+    timestamp_filtered_count = 0
+    
+    # Calculate timestamp threshold if specified
+    timestamp_threshold = None
+    if timestamp_threshold_days is not None:
+        timestamp_threshold = datetime.now() - timedelta(days=timestamp_threshold_days)
+        print(f"Filtering out items older than {timestamp_threshold.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Track unique content hashes
     seen_hashes = set()
@@ -45,6 +54,36 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
             # Skip rows with empty content
             if pd.isna(row.get('content')) or not row.get('content'):
                 continue
+            
+            # Filter by timestamp if specified
+            if timestamp_threshold is not None:
+                timestamp_str = row.get('timestamp', '')
+                # print(f"Timestamp: {timestamp_str}")
+                if timestamp_str:
+                    try:
+                        # Parse the timestamp string (format: 2025-04-03 19:02:55+00)
+                        # The format in the CSV is '2025-01-06 17:51:58+00' which doesn't match '%Y-%m-%d %H:%M:%S%z'
+                        # We need to handle the timezone part differently
+                        if '+' in timestamp_str:
+                            # Split the timestamp and timezone parts
+                            base_timestamp, tz = timestamp_str.split('+')
+                            # Parse the base timestamp
+                            item_timestamp = datetime.strptime(base_timestamp, '%Y-%m-%d %H:%M:%S')
+                        else:
+                            # If no timezone info, just parse the timestamp
+                            item_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+                        
+                        # print(f"Item timestamp: {item_timestamp}")
+                        
+                        if item_timestamp < timestamp_threshold:
+                            timestamp_filtered_count += 1
+                            continue
+                    except (ValueError, TypeError) as e:
+                        # Skip if timestamp can't be parsed
+                        print(f"Error parsing timestamp: {timestamp_str}")
+                        print(f"Error type: {type(timestamp_str)}")
+                        print(f"Error message: {e}")
+                        pass
             
             # Filter by team ID if specified
             team_id = row.get('team_id', 'unknown')
@@ -98,6 +137,8 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000):
     print(f"F5Bot filtered entries: {f5bot_filtered_count}")
     if team_id_filter is not None:
         print(f"Team ID filtered entries (not team {team_id_filter}): {team_filtered_count}")
+    if timestamp_threshold is not None:
+        print(f"Timestamp filtered entries (older than {timestamp_threshold_days} days): {timestamp_filtered_count}")
     
     print("\nStatus breakdown:")
     # Group RELEVANT and REPLIED
@@ -121,5 +162,8 @@ if __name__ == "__main__":
     # Team ID to filter by (set to None to process all teams)
     team_id_filter = 1
     
+    # Timestamp threshold in days (set to None to process all timestamps)
+    timestamp_threshold_days = 90  # Filter out items older than 90 days
+    
     # Process the CSV file
-    process_hits_csv(csv_path, team_id_filter=team_id_filter) 
+    process_hits_csv(csv_path, team_id_filter=team_id_filter, timestamp_threshold_days=timestamp_threshold_days) 
