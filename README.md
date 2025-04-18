@@ -14,7 +14,7 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 
 ## Sample Results
 
-Pre-processing
+Pre-processing (Apr 5)
 
 ```
 Total entries processed: 9353
@@ -30,7 +30,23 @@ NEW: 3
 CONTENT_REMOVED: 59
 ```
 
-Model Results
+Pre-processing (Apr 18)
+
+```
+Total entries processed: 8473
+Unique entries: 4258
+Duplicate entries: 1174
+F5Bot filtered entries: 8
+Team ID filtered entries (not team 1): 0
+
+Status breakdown:
+RELEVANT/REPLIED: 274
+IGNORED: 3828
+NEW: 86
+CONTENT_REMOVED: 70
+```
+
+Model Results (Apr 5)
 
 ```
                precision    recall  f1-score   support

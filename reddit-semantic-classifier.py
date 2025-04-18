@@ -396,7 +396,7 @@ def main():
     trained_model = train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3)
     
     # Save model
-    model_save_path = "reddit_topic_classifier_2.pt"
+    model_save_path = "reddit_topic_classifier_3.pt"
     torch.save(trained_model.state_dict(), model_save_path)
     logger.info(f"Model saved to {model_save_path}")
     
