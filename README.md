@@ -14,7 +14,7 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 
 ## Sample Results
 
-Apr 5 run
+### Apr 5 run
 
 Pre-processing
 
@@ -45,7 +45,7 @@ Model Results
 weighted avg       0.96      0.93      0.94      1487
 ```
 
-Apr 18 run
+### Apr 18 run
 
 Pre-processing
 
@@ -74,6 +74,25 @@ Model Results
     accuracy                           0.92       821
    macro avg       0.68      0.74      0.71       821
 weighted avg       0.93      0.92      0.92       821
+```
+
+### Apr 19 run
+
+Pre-processing
+
+```
+Total entries processed: 8288
+Unique entries: 4076
+Duplicate entries: 1171
+F5Bot filtered entries: 0
+Team ID filtered entries (not team 1): 0
+Timestamp filtered entries (older than 90 days): 193
+
+Status breakdown:
+RELEVANT/REPLIED: 123
+IGNORED: 3828
+NEW: 86
+CONTENT_REMOVED: 39
 ```
 
 ## Running the API Server
