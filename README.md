@@ -14,7 +14,9 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 
 ## Sample Results
 
-Pre-processing (Apr 5)
+Apr 5 run
+
+Pre-processing
 
 ```
 Total entries processed: 9353
@@ -30,7 +32,22 @@ NEW: 3
 CONTENT_REMOVED: 59
 ```
 
-Pre-processing (Apr 18)
+Model Results
+
+```
+               precision    recall  f1-score   support
+
+           0       0.98      0.95      0.96      1437
+           1       0.25      0.50      0.33        50
+
+    accuracy                           0.93      1487
+   macro avg       0.62      0.72      0.65      1487
+weighted avg       0.96      0.93      0.94      1487
+```
+
+Apr 18 run
+
+Pre-processing
 
 ```
 Total entries processed: 8473
@@ -46,17 +63,17 @@ NEW: 86
 CONTENT_REMOVED: 70
 ```
 
-Model Results (Apr 5)
+Model Results
 
 ```
-               precision    recall  f1-score   support
+              precision    recall  f1-score   support
 
-           0       0.98      0.95      0.96      1437
-           1       0.25      0.50      0.33        50
+           0       0.97      0.94      0.95       766
+           1       0.40      0.53      0.46        55
 
-    accuracy                           0.93      1487
-   macro avg       0.62      0.72      0.65      1487
-weighted avg       0.96      0.93      0.94      1487
+    accuracy                           0.92       821
+   macro avg       0.68      0.74      0.71       821
+weighted avg       0.93      0.92      0.92       821
 ```
 
 ## Running the API Server

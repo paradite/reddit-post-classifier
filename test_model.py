@@ -7,8 +7,9 @@ import logging
 import datetime
 
 # Configuration
-NUM_SAMPLES = 10  # Number of samples to test from each category
-MODEL_PATH = "reddit_topic_classifier.pt"
+NUM_SAMPLES = 30  # Number of samples to test from each category
+MODEL_PATH = "reddit_topic_classifier_run3.pt"
+# MODEL_PATH = "best_model_run3_epoch_9.pt"
 IRRELEVANT_FOLDER = "irrelevant_posts"
 RELEVANT_FOLDER = "relevant_posts"
 OUTPUT_DIR = "model_test_results"
@@ -112,6 +113,18 @@ def main():
     irrelevant_samples = get_random_samples(IRRELEVANT_FOLDER, NUM_SAMPLES)
     relevant_samples = get_random_samples(RELEVANT_FOLDER, NUM_SAMPLES)
     
+    # Initialize counters for summary
+    total_samples = 0
+    correct_predictions = 0
+    irrelevant_correct = 0
+    relevant_correct = 0
+    
+    # Initialize confusion matrix counters
+    true_positives = 0  # Correctly predicted relevant
+    false_positives = 0  # Incorrectly predicted as relevant
+    true_negatives = 0  # Correctly predicted irrelevant
+    false_negatives = 0  # Incorrectly predicted as irrelevant
+    
     # Open output file
     with open(output_file, 'w', encoding='utf-8') as f:
         # Write header
@@ -127,6 +140,14 @@ def main():
         for sample in irrelevant_samples:
             result = predict_single_post(sample['content'], model, tokenizer, device)
             is_correct = result['prediction'] == IRRELEVANT_LABEL
+            
+            if is_correct:
+                irrelevant_correct += 1
+                correct_predictions += 1
+                true_negatives += 1
+            else:
+                false_positives += 1
+            total_samples += 1
             
             f.write(f"File: {sample['filename']}\n")
             f.write(f"Prediction: {LABEL_NAMES[result['prediction']]} (confidence: {result['confidence']:.4f})\n")
@@ -147,6 +168,14 @@ def main():
             result = predict_single_post(sample['content'], model, tokenizer, device)
             is_correct = result['prediction'] == RELEVANT_LABEL
             
+            if is_correct:
+                relevant_correct += 1
+                correct_predictions += 1
+                true_positives += 1
+            else:
+                false_negatives += 1
+            total_samples += 1
+            
             f.write(f"File: {sample['filename']}\n")
             f.write(f"Prediction: {LABEL_NAMES[result['prediction']]} (confidence: {result['confidence']:.4f})\n")
             f.write(f"Correct: {'Yes' if is_correct else 'No'}\n")
@@ -156,12 +185,56 @@ def main():
                 f.write(f"Text: {sample['content']}\n")
             
             f.write("-"*80 + "\n\n")
+        
+        # Calculate metrics
+        accuracy = (correct_predictions / total_samples) * 100
+        irrelevant_accuracy = (irrelevant_correct / NUM_SAMPLES) * 100
+        relevant_accuracy = (relevant_correct / NUM_SAMPLES) * 100
+        
+        # Calculate precision, recall, and F1
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        # Write summary
+        f.write("="*80 + "\n")
+        f.write("SUMMARY\n")
+        f.write("="*80 + "\n\n")
+        
+        f.write(f"Total samples tested: {total_samples}\n")
+        f.write(f"Overall accuracy: {accuracy:.2f}%\n")
+        f.write(f"Irrelevant samples accuracy: {irrelevant_accuracy:.2f}% ({irrelevant_correct}/{NUM_SAMPLES})\n")
+        f.write(f"Relevant samples accuracy: {relevant_accuracy:.2f}% ({relevant_correct}/{NUM_SAMPLES})\n\n")
+        
+        f.write("Detailed Metrics:\n")
+        f.write(f"Precision: {precision:.4f}\n")
+        f.write(f"Recall: {recall:.4f}\n")
+        f.write(f"F1 Score: {f1:.4f}\n\n")
+        
+        f.write("Confusion Matrix:\n")
+        f.write(f"True Positives: {true_positives}\n")
+        f.write(f"False Positives: {false_positives}\n")
+        f.write(f"True Negatives: {true_negatives}\n")
+        f.write(f"False Negatives: {false_negatives}\n")
     
     logger.info(f"Test results saved to {output_file}")
     
-    # Also print a summary to the console
-    print(f"\nTest results saved to {output_file}")
-    print("Check the file for detailed results.")
+    # Print summary to console
+    print("\nTest Results Summary:")
+    print(f"Total samples tested: {total_samples}")
+    print(f"Overall accuracy: {accuracy:.2f}%")
+    print(f"Irrelevant samples accuracy: {irrelevant_accuracy:.2f}% ({irrelevant_correct}/{NUM_SAMPLES})")
+    print(f"Relevant samples accuracy: {relevant_accuracy:.2f}% ({relevant_correct}/{NUM_SAMPLES})")
+    print("\nDetailed Metrics:")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    print("\nConfusion Matrix:")
+    print(f"True Positives: {true_positives}")
+    print(f"False Positives: {false_positives}")
+    print(f"True Negatives: {true_negatives}")
+    print(f"False Negatives: {false_negatives}")
+    print(f"\nDetailed results saved to {output_file}")
 
 if __name__ == "__main__":
     main() 

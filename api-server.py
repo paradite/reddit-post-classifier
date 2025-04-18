@@ -14,7 +14,7 @@ logging.basicConfig(
 )
 
 # Constants
-MODEL_PATH = "reddit_topic_classifier_2.pt"
+MODEL_PATH = "reddit_topic_classifier_run3.pt"
 MAX_BATCH_SIZE = 10
 
 # Load model
