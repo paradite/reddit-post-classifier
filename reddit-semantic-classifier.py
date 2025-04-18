@@ -12,7 +12,7 @@ import time
 import logging
 
 # Global run number for tracking different training runs
-RUN_NUMBER = 3  # Increment this for each new training run
+RUN_NUMBER = 4  # Increment this for each new training run
 
 # Define label constants
 IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
@@ -35,7 +35,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger.info(f"Using {device} for training")
 
 # Load pre-trained model and tokenizer
-model_name = 'distilbert-base-uncased'
+model_name = 'roberta-base'
 logger.info(f"Loading model and tokenizer: {model_name}")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
