@@ -95,6 +95,19 @@ NEW: 86
 CONTENT_REMOVED: 39
 ```
 
+Model Results
+
+```
+              precision    recall  f1-score   support
+
+           0       0.97      0.98      0.97       766
+           1       0.05      0.04      0.05        25
+
+    accuracy                           0.95       791
+   macro avg       0.51      0.51      0.51       791
+weighted avg       0.94      0.95      0.94       791
+```
+
 ## Running the API Server
 
 ### Using Docker Compose (Recommended)

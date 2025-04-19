@@ -13,7 +13,7 @@ import time
 import logging
 
 # Global run number for tracking different training runs
-RUN_NUMBER = 6  # Increment this for each new training run
+RUN_NUMBER = 7  # Increment this for each new training run
 
 # Define label constants
 IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
@@ -114,7 +114,19 @@ class RedditDataset(Dataset):
 def calculate_class_weights(labels):
     class_counts = np.bincount(labels)
     total_samples = len(labels)
+    
+    # Apply inverse frequency weighting with additional boost for minority class
     class_weights = total_samples / (len(class_counts) * class_counts)
+    
+    # Apply additional boost to minority class (class 1)
+    minority_class_idx = 1
+    boost_factor = 3.0  # Increase this value to give more weight to minority class
+    class_weights[minority_class_idx] *= boost_factor
+    
+    logger.info(f"Class counts: {class_counts}")
+    logger.info(f"Base class weights: {total_samples / (len(class_counts) * class_counts)}")
+    logger.info(f"Boosted class weights: {class_weights}")
+    
     return torch.tensor(class_weights, dtype=torch.float)
 
 # Training function with early stopping
@@ -193,7 +205,7 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             optimizer.step()
             
             # Print batch progress
-            if (batch_idx + 1) % 10 == 0:  # Print every 10 batches
+            if (batch_idx + 1) % 100 == 0:  # Print every 100 batches
                 batch_time = time.time() - batch_start_time
                 current_accuracy = 100. * train_correct / train_total
                 logger.info(f"Batch {batch_idx + 1}/{len(train_loader)} - Loss: {loss.item():.4f}, Accuracy: {current_accuracy:.2f}%, Time: {batch_time:.2f}s")
