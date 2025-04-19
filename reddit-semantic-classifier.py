@@ -121,7 +121,7 @@ def calculate_class_weights(labels):
 def train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3, project_name="reddit-classifier"):
     # Initialize wandb
     # generate a unique id for the run based on model and parameters
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = datetime.datetime.now().strftime("%Y-%m-%d")
     run_id = f"{RUN_NUMBER}-{model_name}-{epochs}-{patience}-{device}-{date}"
     wandb.init(project=project_name, 
                id=run_id,
