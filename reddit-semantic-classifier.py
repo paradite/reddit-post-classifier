@@ -12,7 +12,7 @@ import time
 import logging
 
 # Global run number for tracking different training runs
-RUN_NUMBER = 4  # Increment this for each new training run
+RUN_NUMBER = 5  # Increment this for each new training run
 
 # Define label constants
 IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
