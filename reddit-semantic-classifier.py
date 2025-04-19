@@ -1,3 +1,4 @@
+import datetime
 import pandas as pd
 import numpy as np
 import torch
@@ -119,7 +120,12 @@ def calculate_class_weights(labels):
 # Training function with early stopping
 def train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3, project_name="reddit-classifier"):
     # Initialize wandb
-    wandb.init(project=project_name, config={
+    # generate a unique id for the run based on model and parameters
+    date = datetime.now().strftime("%Y-%m-%d")
+    run_id = f"{RUN_NUMBER}-{model_name}-{epochs}-{patience}-{device}-{date}"
+    wandb.init(project=project_name, 
+               id=run_id,
+               config={
         "model_name": model_name,
         "epochs": epochs,
         "batch_size": train_loader.batch_size,
