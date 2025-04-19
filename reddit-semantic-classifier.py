@@ -12,8 +12,24 @@ import wandb
 import time
 import logging
 
+# ===== HYPERPARAMETERS =====
 # Global run number for tracking different training runs
-RUN_NUMBER = 7  # Increment this for each new training run
+RUN_NUMBER = 12  # Increment this for each new training run
+
+# Model configuration
+MODEL_NAME = 'roberta-base'
+MAX_LENGTH = 512
+BATCH_SIZE = 16
+
+# Training configuration
+EPOCHS = 20
+PATIENCE = 5
+LEARNING_RATE = 1e-5
+GRADIENT_CLIP_MAX_NORM = 1.0
+
+# Class imbalance handling
+CLASS_WEIGHT_BOOST_FACTOR = 15.0  # Boost factor for minority class
+FOCAL_LOSS_GAMMA = 1.5  # Gamma parameter for Focal Loss
 
 # Define label constants
 IRRELEVANT_LABEL = 0  # Posts that are not relevant to the topic
@@ -23,6 +39,7 @@ LABEL_NAMES = {
     RELEVANT_LABEL: "relevant"
 }
 
+# ===== SETUP =====
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -36,12 +53,37 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger.info(f"Using {device} for training")
 
 # Load pre-trained model and tokenizer
-model_name = 'distilbert-base-uncased'
-logger.info(f"Loading model and tokenizer: {model_name}")
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+logger.info(f"Loading model and tokenizer: {MODEL_NAME}")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
 model.to(device)
 logger.info(f"Model loaded and moved to {device}")
+
+# Focal Loss implementation for handling class imbalance
+class FocalLoss(torch.nn.Module):
+    def __init__(self, alpha=None, gamma=FOCAL_LOSS_GAMMA, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        
+    def forward(self, inputs, targets):
+        ce_loss = torch.nn.functional.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        
+        # Apply alpha weights if provided
+        if self.alpha is not None:
+            alpha_t = self.alpha[targets]
+            focal_loss = alpha_t * (1-pt)**self.gamma * ce_loss
+        else:
+            focal_loss = (1-pt)**self.gamma * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
 
 # Function to load posts from folders
 def load_posts_from_folders(relevant_folder, irrelevant_folder):
@@ -80,7 +122,7 @@ def load_posts_from_folders(relevant_folder, irrelevant_folder):
 
 # Custom dataset class
 class RedditDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length=512):
+    def __init__(self, texts, labels, tokenizer, max_length=MAX_LENGTH):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
@@ -120,7 +162,7 @@ def calculate_class_weights(labels):
     
     # Apply additional boost to minority class (class 1)
     minority_class_idx = 1
-    boost_factor = 3.0  # Increase this value to give more weight to minority class
+    boost_factor = CLASS_WEIGHT_BOOST_FACTOR  # Use the hyperparameter
     class_weights[minority_class_idx] *= boost_factor
     
     logger.info(f"Class counts: {class_counts}")
@@ -130,31 +172,34 @@ def calculate_class_weights(labels):
     return torch.tensor(class_weights, dtype=torch.float)
 
 # Training function with early stopping
-def train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3, project_name="reddit-classifier"):
+def train_model(model, train_loader, val_loader, class_weights, epochs=EPOCHS, patience=PATIENCE, project_name="reddit-classifier"):
     # Initialize wandb
     # generate a unique id for the run based on model and parameters
     date = datetime.datetime.now().strftime("%Y-%m-%d")
-    run_id = f"{RUN_NUMBER}-{model_name}-{epochs}-{patience}-{device}-{date}"
+    run_id = f"{RUN_NUMBER}-{MODEL_NAME}-{epochs}-{patience}-{device}-{date}"
     wandb.init(project=project_name, 
                id=run_id,
                config={
-        "model_name": model_name,
+        "model_name": MODEL_NAME,
         "epochs": epochs,
         "batch_size": train_loader.batch_size,
-        "learning_rate": 2e-5,
+        "learning_rate": LEARNING_RATE,
         "device": str(device),
         "train_size": len(train_loader.dataset),
         "val_size": len(val_loader.dataset),
         "class_weights": class_weights.tolist(),
         "patience": patience,
-        "run_number": RUN_NUMBER
+        "run_number": RUN_NUMBER,
+        "loss_function": "FocalLoss",  # Added to track that we're using FocalLoss
+        "focal_loss_gamma": FOCAL_LOSS_GAMMA,
+        "class_weight_boost": CLASS_WEIGHT_BOOST_FACTOR
     })
     
     # Log model architecture
     wandb.watch(model, log="all")
     
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2)
     
     best_val_accuracy = 0.0
     best_epoch = 0
@@ -162,6 +207,9 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
     
     # Move class weights to device
     class_weights = class_weights.to(device)
+    
+    # Initialize Focal Loss with class weights
+    focal_loss = FocalLoss(alpha=class_weights, gamma=FOCAL_LOSS_GAMMA)
     
     for epoch in range(epochs):
         epoch_start_time = time.time()
@@ -189,10 +237,9 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
                 labels=labels
             )
             
-            # Apply class weights to loss
-            loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
+            # Apply Focal Loss with class weights
             logits = outputs.logits
-            loss = loss_fct(logits, labels)
+            loss = focal_loss(logits, labels)
             
             train_loss += loss.item()
             
@@ -202,6 +249,10 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             train_total += labels.size(0)
             
             loss.backward()
+            
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRADIENT_CLIP_MAX_NORM)
+            
             optimizer.step()
             
             # Print batch progress
@@ -241,10 +292,9 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
                 labels=labels
             )
             
-            # Apply class weights to validation loss
-            loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
+            # Apply Focal Loss with class weights
             logits = outputs.logits
-            loss = loss_fct(logits, labels)
+            loss = focal_loss(logits, labels)
             
             val_loss += loss.item()
             preds = torch.argmax(logits, dim=1).cpu().numpy()
@@ -253,7 +303,7 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             val_true.extend(labels.cpu().numpy())
             
             # Print validation progress
-            if (batch_idx + 1) % 10 == 0:
+            if (batch_idx + 1) % 30 == 0:
                 logger.info(f"Validation batch {batch_idx + 1}/{len(val_loader)} - Loss: {loss.item():.4f}")
         
         accuracy = accuracy_score(val_true, val_preds)
@@ -261,9 +311,6 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
         logger.info(f"Validation - Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}")
         report = classification_report(val_true, val_preds, output_dict=True)
         logger.info(f"\nClassification Report:\n\n{classification_report(val_true, val_preds)}")
-        
-        # Update learning rate scheduler
-        scheduler.step(accuracy)
         
         # Helper function to safely get metric value
         def get_metric(label, metric_name, default=0.0):
@@ -275,6 +322,13 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
             if metric_name not in report[label_str]:
                 return default
             return report[label_str][metric_name]
+        
+        # Get F1 score for relevant class (label 1)
+        relevant_f1 = get_metric(RELEVANT_LABEL, "f1-score")
+        logger.info(f"Relevant class F1 score: {relevant_f1:.4f}")
+        
+        # Update learning rate scheduler
+        scheduler.step(relevant_f1)  # Use relevant F1 score instead of accuracy
         
         # Log epoch metrics to wandb
         wandb.log({
@@ -293,20 +347,20 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
         })
         
         # Early stopping check
-        if accuracy > best_val_accuracy:
-            best_val_accuracy = accuracy
+        if relevant_f1 > best_val_accuracy:  # Use relevant F1 score instead of accuracy
+            best_val_accuracy = relevant_f1
             best_epoch = epoch
             patience_counter = 0
-            logger.info(f"New best model with validation accuracy: {best_val_accuracy:.4f}")
+            logger.info(f"New best model with relevant F1 score: {best_val_accuracy:.4f}")
             torch.save(model.state_dict(), f"best_model_run{RUN_NUMBER}_epoch_{epoch+1}.pt")
             wandb.save(f"best_model_run{RUN_NUMBER}_epoch_{epoch+1}.pt")
         else:
             patience_counter += 1
-            logger.info(f"No improvement for {patience_counter} epochs. Best accuracy: {best_val_accuracy:.4f}")
+            logger.info(f"No improvement for {patience_counter} epochs. Best relevant F1 score: {best_val_accuracy:.4f}")
             
             # Early stopping
             if patience_counter >= patience:
-                logger.info(f"Early stopping triggered after {epoch+1} epochs. Best epoch was {best_epoch+1} with accuracy {best_val_accuracy:.4f}")
+                logger.info(f"Early stopping triggered after {epoch+1} epochs. Best epoch was {best_epoch+1} with relevant F1 score {best_val_accuracy:.4f}")
                 break
     
     wandb.finish()
@@ -322,7 +376,7 @@ def predict_relevance(new_posts, model, tokenizer, device):
         encoding = tokenizer(
             post,
             add_special_tokens=True,
-            max_length=512,
+            max_length=MAX_LENGTH,
             return_token_type_ids=False,
             padding='max_length',
             truncation=True,
@@ -407,14 +461,13 @@ def main():
     sample_weights = [float(w) for w in weights[train_labels]]  # Convert to list of floats
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
     
-    # Create dataloaders
-    batch_size = 8
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
+    # Create dataloaders with batch size from hyperparameters
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=sampler)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
     
-    # Train model with increased epochs and early stopping
+    # Train model with hyperparameters
     logger.info("Starting training...")
-    trained_model = train_model(model, train_loader, val_loader, class_weights, epochs=10, patience=3)
+    trained_model = train_model(model, train_loader, val_loader, class_weights)
     
     # Save model
     model_save_path = f"reddit_topic_classifier_run{RUN_NUMBER}.pt"

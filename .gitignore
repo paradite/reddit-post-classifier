@@ -27,3 +27,7 @@ model_test_results/*.txt
 
 # docs
 docs/classifier-server.md
+
+# logs
+*.log
+log.txt

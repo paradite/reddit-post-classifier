@@ -97,6 +97,8 @@ CONTENT_REMOVED: 39
 
 Model Results
 
+distilbert-base-uncased
+
 ```
               precision    recall  f1-score   support
 
@@ -106,6 +108,19 @@ Model Results
     accuracy                           0.95       791
    macro avg       0.51      0.51      0.51       791
 weighted avg       0.94      0.95      0.94       791
+```
+
+roberta-base
+
+```
+              precision    recall  f1-score   support
+
+           0       0.97      0.98      0.98       766
+           1       0.22      0.16      0.19        25
+
+    accuracy                           0.96       791
+   macro avg       0.60      0.57      0.58       791
+weighted avg       0.95      0.96      0.95       791
 ```
 
 ## Running the API Server
