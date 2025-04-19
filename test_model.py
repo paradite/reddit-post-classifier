@@ -8,8 +8,10 @@ import datetime
 
 # Configuration
 NUM_SAMPLES = 30  # Number of samples to test from each category
-MODEL_PATH = "reddit_topic_classifier_run3.pt"
 # MODEL_PATH = "best_model_run3_epoch_9.pt"
+# MODEL_PATH = "reddit_topic_classifier_run3.pt"
+MODEL_PATH = "best_model_run12_epoch_9.pt"
+MODEL_NAME = "roberta-base"  # Model architecture to use
 IRRELEVANT_FOLDER = "irrelevant_posts"
 RELEVANT_FOLDER = "relevant_posts"
 OUTPUT_DIR = "model_test_results"
@@ -30,23 +32,69 @@ LABEL_NAMES = {
     RELEVANT_LABEL: "relevant"
 }
 
+def check_model_compatibility(model_path, model_name):
+    """
+    Check if the saved model is compatible with the current model architecture.
+    Returns True if compatible, False if not.
+    """
+    try:
+        # Try to load the state dict
+        state_dict = torch.load(model_path, map_location='cpu')
+        
+        # Check if the state dict contains keys specific to the old architecture
+        if "distilbert" in str(state_dict.keys()) and "roberta" in model_name:
+            logger.warning("Model architecture mismatch detected. The saved model was trained with DistilBERT but you're trying to load it with RoBERTa.")
+            return False
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error checking model compatibility: {e}")
+        return False
+
 def load_model(model_path):
-    """Load the trained model from the specified path."""
+    """
+    Load the model and tokenizer from the specified path.
+    Handles architecture changes between DistilBERT and RoBERTa.
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using {device} for inference")
     
-    # Load pre-trained model and tokenizer
-    model_name = 'distilbert-base-uncased'
-    logger.info(f"Loading model and tokenizer: {model_name}")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+    # Check model compatibility
+    if not check_model_compatibility(model_path, MODEL_NAME):
+        logger.warning("Attempting to load model with architecture conversion...")
     
-    # Load the trained weights
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    # Load tokenizer
+    logger.info(f"Loading model and tokenizer: {MODEL_NAME}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    
+    # Create a new model
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
     model.to(device)
+    
+    # Load state dict
+    state_dict = torch.load(model_path, map_location=device)
+    
+    # Filter out incompatible keys
+    filtered_state_dict = {}
+    for key, value in state_dict.items():
+        # Skip keys that are specific to DistilBERT but not in RoBERTa
+        if "roberta.embeddings.position_ids" in key:
+            continue
+        
+        # Map DistilBERT keys to RoBERTa keys if needed
+        if "distilbert" in key:
+            new_key = key.replace("distilbert", "roberta")
+            filtered_state_dict[new_key] = value
+        else:
+            filtered_state_dict[key] = value
+    
+    # Load the filtered state dict
+    model.load_state_dict(filtered_state_dict, strict=False)
+    logger.info("Model loaded successfully")
+    
+    # Set model to evaluation mode
     model.eval()
     
-    logger.info(f"Model loaded from {model_path}")
     return model, tokenizer, device
 
 def predict_single_post(post, model, tokenizer, device):

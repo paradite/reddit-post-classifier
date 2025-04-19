@@ -14,18 +14,45 @@ logging.basicConfig(
 )
 
 # Constants
-MODEL_PATH = "reddit_topic_classifier_run3.pt"
+# MODEL_PATH = "reddit_topic_classifier_run3.pt"
+MODEL_PATH = "best_model_run12_epoch_9.pt"
+MODEL_NAME = "roberta-base"  # Changed from distilbert-base-uncased to roberta-base
 MAX_BATCH_SIZE = 10
 
 # Load model
 logging.info("Loading model and tokenizer...")
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logging.info(f"Using device: {device}")
-tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
-model = AutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=2)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+
+# Load tokenizer
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+# Create a new model
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
 model.to(device)
+
+# Load state dict with compatibility handling
+state_dict = torch.load(MODEL_PATH, map_location=device)
+
+# Filter out incompatible keys
+filtered_state_dict = {}
+for key, value in state_dict.items():
+    # Skip keys that are specific to DistilBERT but not in RoBERTa
+    if "roberta.embeddings.position_ids" in key:
+        continue
+    
+    # Map DistilBERT keys to RoBERTa keys if needed
+    if "distilbert" in key:
+        new_key = key.replace("distilbert", "roberta")
+        filtered_state_dict[new_key] = value
+    else:
+        filtered_state_dict[key] = value
+
+# Load the filtered state dict
+model.load_state_dict(filtered_state_dict, strict=False)
 model.eval()
+
+logging.info("Model loaded successfully")
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):

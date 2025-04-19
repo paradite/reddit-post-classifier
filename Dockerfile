@@ -16,7 +16,7 @@ COPY api-requirements.txt .
 RUN pip install --no-cache-dir -r api-requirements.txt
 
 # Copy the model file and server code
-COPY reddit_topic_classifier_run3.pt .
+COPY best_model_run12_epoch_9.pt .
 COPY api-server.py .
 
 # Expose the port the server runs on
