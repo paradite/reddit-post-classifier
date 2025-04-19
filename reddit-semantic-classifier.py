@@ -241,9 +241,8 @@ def train_model(model, train_loader, val_loader, class_weights, epochs=10, patie
         accuracy = accuracy_score(val_true, val_preds)
         avg_val_loss = val_loss / len(val_loader)
         logger.info(f"Validation - Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}")
-        logger.info("\nClassification Report:\n")
         report = classification_report(val_true, val_preds, output_dict=True)
-        logger.info(classification_report(val_true, val_preds))
+        logger.info(f"\nClassification Report:\n\n{classification_report(val_true, val_preds)}")
         
         # Update learning rate scheduler
         scheduler.step(accuracy)
