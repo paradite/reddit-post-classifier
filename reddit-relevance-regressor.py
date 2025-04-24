@@ -350,9 +350,9 @@ def predict_folder(folder_path, model, tokenizer, device, threshold=0.5):
 # Function to find optimal threshold
 def find_optimal_threshold(val_predictions, val_true):
     # val_predictions are already sigmoid-applied (0-1 range)
-    thresholds = np.arange(0.1, 0.9, 0.05)
+    thresholds = np.arange(0.01, 0.5, 0.01)  # Wider range starting from 0.01
     best_f1 = 0
-    best_threshold = 0.5
+    best_threshold = 0.1  # Lower default threshold
     
     for threshold in thresholds:
         binary_preds = [1 if p >= threshold else 0 for p in val_predictions]
@@ -371,7 +371,7 @@ def find_optimal_threshold(val_predictions, val_true):
             best_f1 = f1
             best_threshold = threshold
     
-    logger.info(f"Optimal threshold: {best_threshold:.2f} with F1 score: {best_f1:.4f}")
+    logger.info(f"Optimal threshold: {best_threshold:.4f} with F1 score: {best_f1:.4f}")
     return best_threshold
 
 # Main execution function

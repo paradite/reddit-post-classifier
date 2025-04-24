@@ -6,6 +6,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import logging
 import time
+import numpy as np
 
 # Set up logging
 logging.basicConfig(
@@ -15,28 +16,48 @@ logging.basicConfig(
 
 # Constants
 # MODEL_PATH = "reddit_topic_classifier_run3.pt"
-MODEL_PATH = "best_model_run12_epoch_9.pt"
+CLASSIFIER_MODEL_PATH = "best_model_run12_epoch_9.pt"
+REGRESSOR_MODEL_PATH = "best_regressor_run1_epoch_4.pt"
 MODEL_NAME = "roberta-base"  # Changed from distilbert-base-uncased to roberta-base
 MAX_BATCH_SIZE = 10
+THRESHOLD = 0.05  # Threshold for regressor model
 
-# Load model
-logging.info("Loading model and tokenizer...")
+# Load models
+logging.info("Loading models and tokenizer...")
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logging.info(f"Using device: {device}")
 
 # Load tokenizer
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-# Create a new model
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
-model.to(device)
+# Define the RegressionHead class
+class RegressionHead(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.dense = torch.nn.Linear(config.hidden_size, config.hidden_size)
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
+        self.out_proj = torch.nn.Linear(config.hidden_size, 1)
 
-# Load state dict with compatibility handling
-state_dict = torch.load(MODEL_PATH, map_location=device)
+    def forward(self, features, **kwargs):
+        x = features[:, 0, :]  # Take <s> token (equiv. to [CLS])
+        x = self.dropout(x)
+        x = self.dense(x)
+        x = torch.tanh(x)
+        x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
 
-# Filter out incompatible keys
-filtered_state_dict = {}
-for key, value in state_dict.items():
+# Load classifier model
+logging.info("Loading classifier model...")
+classifier_model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
+classifier_model.to(device)
+
+# Load state dict with compatibility handling for classifier
+classifier_state_dict = torch.load(CLASSIFIER_MODEL_PATH, map_location=device)
+
+# Filter out incompatible keys for classifier
+filtered_classifier_state_dict = {}
+for key, value in classifier_state_dict.items():
     # Skip keys that are specific to DistilBERT but not in RoBERTa
     if "roberta.embeddings.position_ids" in key:
         continue
@@ -44,15 +65,42 @@ for key, value in state_dict.items():
     # Map DistilBERT keys to RoBERTa keys if needed
     if "distilbert" in key:
         new_key = key.replace("distilbert", "roberta")
-        filtered_state_dict[new_key] = value
+        filtered_classifier_state_dict[new_key] = value
     else:
-        filtered_state_dict[key] = value
+        filtered_classifier_state_dict[key] = value
 
-# Load the filtered state dict
-model.load_state_dict(filtered_state_dict, strict=False)
-model.eval()
+# Load the filtered state dict for classifier
+classifier_model.load_state_dict(filtered_classifier_state_dict, strict=False)
+classifier_model.eval()
 
-logging.info("Model loaded successfully")
+# Load regressor model
+logging.info("Loading regressor model...")
+regressor_model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=1)
+regressor_model.classifier = RegressionHead(regressor_model.config)
+regressor_model.to(device)
+
+# Load state dict with compatibility handling for regressor
+regressor_state_dict = torch.load(REGRESSOR_MODEL_PATH, map_location=device)
+
+# Filter out incompatible keys for regressor
+filtered_regressor_state_dict = {}
+for key, value in regressor_state_dict.items():
+    # Skip keys that are specific to DistilBERT but not in RoBERTa
+    if "roberta.embeddings.position_ids" in key:
+        continue
+    
+    # Map DistilBERT keys to RoBERTa keys if needed
+    if "distilbert" in key:
+        new_key = key.replace("distilbert", "roberta")
+        filtered_regressor_state_dict[new_key] = value
+    else:
+        filtered_regressor_state_dict[key] = value
+
+# Load the filtered state dict for regressor
+regressor_model.load_state_dict(filtered_regressor_state_dict, strict=False)
+regressor_model.eval()
+
+logging.info("Models loaded successfully")
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -93,6 +141,8 @@ class Handler(BaseHTTPRequestHandler):
         results = []
         for i, text in enumerate(texts):
             text_start_time = time.time()
+            
+            # Tokenize text once for both models
             encoding = tokenizer(
                 text,
                 add_special_tokens=True,
@@ -106,17 +156,46 @@ class Handler(BaseHTTPRequestHandler):
             input_ids = torch.tensor(encoding['input_ids']).to(device)
             attention_mask = torch.tensor(encoding['attention_mask']).to(device)
 
+            # Get classifier prediction
             with torch.no_grad():
-                output = model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = output.logits
-                probs = torch.softmax(logits, dim=1)
-                pred = int(torch.argmax(probs, dim=1).item())
-                conf = probs[0][pred].item()
+                classifier_output = classifier_model(input_ids=input_ids, attention_mask=attention_mask)
+                classifier_logits = classifier_output.logits
+                classifier_probs = torch.softmax(classifier_logits, dim=1)
+                classifier_pred = int(torch.argmax(classifier_probs, dim=1).item())
+                classifier_conf = classifier_probs[0][classifier_pred].item()
 
-            result = {'relevant': bool(pred == 1), 'confidence': float(conf)}
+            # Get regressor prediction
+            with torch.no_grad():
+                regressor_output = regressor_model(input_ids=input_ids, attention_mask=attention_mask)
+                regressor_logits = regressor_output.logits.squeeze()
+                # Apply sigmoid to get 0-1 range
+                regressor_score = torch.sigmoid(regressor_logits).cpu().numpy()
+                # Handle both scalar and array outputs
+                if isinstance(regressor_score, np.ndarray) and regressor_score.size > 1:
+                    regressor_score = regressor_score[0]
+                # Determine binary classification based on threshold
+                regressor_is_relevant = regressor_score >= THRESHOLD
+
+            # Combine results
+            result = {
+                'classifier': {
+                    'relevant': bool(classifier_pred == 1), 
+                    'confidence': float(classifier_conf)
+                },
+                'regressor': {
+                    'score': float(regressor_score),
+                    'is_relevant': bool(regressor_is_relevant),
+                    'threshold': THRESHOLD
+                }
+            }
+            
+            # For backward compatibility, include the original fields
+            result['relevant'] = bool(classifier_pred == 1)
+            result['confidence'] = float(classifier_conf)
+            
             results.append(result)
             text_time = time.time() - text_start_time
-            logging.info(f"Text {i+1}/{len(texts)}: {'relevant' if pred == 1 else 'not relevant'} (confidence: {conf:.2f}, time: {text_time:.3f}s)")
+            logging.info(f"Text {i+1}/{len(texts)}: Classifier: {'relevant' if classifier_pred == 1 else 'not relevant'} (confidence: {classifier_conf:.2f}), Regressor: {'relevant' if regressor_is_relevant else 'not relevant'} (score: {regressor_score:.4f}, time: {text_time:.3f}s)")
 
         # For backward compatibility, if it was a single content request, return the same format
         if 'content' in data:

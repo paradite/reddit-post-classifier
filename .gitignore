@@ -31,3 +31,4 @@ docs/classifier-server.md
 # logs
 *.log
 log.txt
+regressor_test_results/

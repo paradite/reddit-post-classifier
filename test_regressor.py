@@ -15,7 +15,9 @@ MODEL_NAME = "roberta-base"  # Model architecture to use
 IRRELEVANT_FOLDER = "irrelevant_posts"
 RELEVANT_FOLDER = "relevant_posts"
 OUTPUT_DIR = "regressor_test_results"
-THRESHOLD = 0.5  # Threshold for binary classification from regression scores
+
+# Empirical best threshold is 0.05, use it for API
+THRESHOLD = 0.05
 
 # Set up logging
 logging.basicConfig(
@@ -136,7 +138,10 @@ def predict_single_post(post, model, tokenizer, device, threshold=THRESHOLD):
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         logits = outputs.logits.squeeze()
         # Apply sigmoid to get 0-1 range
-        score = torch.sigmoid(logits).cpu().numpy()[0]
+        score = torch.sigmoid(logits).cpu().numpy()
+        # Handle both scalar and array outputs
+        if isinstance(score, np.ndarray) and score.size > 1:
+            score = score[0]
         # Determine binary classification based on threshold
         is_relevant = score >= threshold
     
@@ -165,6 +170,42 @@ def get_random_samples(folder_path, num_samples=5):
             logger.error(f"Error reading {filepath}: {e}")
     
     return samples
+
+def find_optimal_threshold(scores, true_labels):
+    """
+    Find the optimal threshold that maximizes F1 score.
+    
+    Args:
+        scores: List of relevance scores
+        true_labels: List of true labels (0.0 for irrelevant, 1.0 for relevant)
+        
+    Returns:
+        Optimal threshold value
+    """
+    thresholds = np.arange(0.01, 0.5, 0.01)
+    best_f1 = 0
+    best_threshold = THRESHOLD
+    
+    for threshold in thresholds:
+        # Convert scores to binary predictions
+        binary_preds = [1 if s >= threshold else 0 for s in scores]
+        binary_true = [1 if t >= 0.5 else 0 for t in true_labels]
+        
+        # Calculate metrics
+        tp = sum(1 for p, t in zip(binary_preds, binary_true) if p == 1 and t == 1)
+        fp = sum(1 for p, t in zip(binary_preds, binary_true) if p == 1 and t == 0)
+        fn = sum(1 for p, t in zip(binary_preds, binary_true) if p == 0 and t == 1)
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = threshold
+    
+    logger.info(f"Optimal threshold: {best_threshold:.4f} with F1 score: {best_f1:.4f}")
+    return best_threshold
 
 def main():
     # Create output directory if it doesn't exist
@@ -197,6 +238,25 @@ def main():
     all_scores = []
     all_true_labels = []
     
+    # First pass: collect all scores to find optimal threshold
+    for sample in irrelevant_samples:
+        result = predict_single_post(sample['content'], model, tokenizer, device, threshold=0.5)
+        all_scores.append(result['score'])
+        all_true_labels.append(IRRELEVANT_LABEL)
+    
+    for sample in relevant_samples:
+        result = predict_single_post(sample['content'], model, tokenizer, device, threshold=0.5)
+        all_scores.append(result['score'])
+        all_true_labels.append(RELEVANT_LABEL)
+    
+    # Find optimal threshold
+    optimal_threshold = find_optimal_threshold(all_scores, all_true_labels)
+    logger.info(f"Using optimal threshold: {optimal_threshold:.4f}")
+    
+    # Reset counters for second pass
+    all_scores = []
+    all_true_labels = []
+    
     # Open output file
     with open(output_file, 'w', encoding='utf-8') as f:
         # Write header
@@ -204,13 +264,15 @@ def main():
         f.write(f"REGRESSOR MODEL TEST RESULTS - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("="*80 + "\n\n")
         
+        f.write(f"Optimal threshold: {optimal_threshold:.4f}\n\n")
+        
         # Test irrelevant samples
         f.write("="*80 + "\n")
         f.write(f"TESTING {NUM_SAMPLES} RANDOM IRRELEVANT SAMPLES\n")
         f.write("="*80 + "\n\n")
         
         for sample in irrelevant_samples:
-            result = predict_single_post(sample['content'], model, tokenizer, device)
+            result = predict_single_post(sample['content'], model, tokenizer, device, threshold=optimal_threshold)
             is_correct = not result['is_relevant']  # For irrelevant samples, prediction should be False
             
             if is_correct:
@@ -242,7 +304,7 @@ def main():
         f.write("="*80 + "\n\n")
         
         for sample in relevant_samples:
-            result = predict_single_post(sample['content'], model, tokenizer, device)
+            result = predict_single_post(sample['content'], model, tokenizer, device, threshold=optimal_threshold)
             is_correct = result['is_relevant']  # For relevant samples, prediction should be True
             
             if is_correct:
