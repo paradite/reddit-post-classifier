@@ -123,6 +123,33 @@ roberta-base
 weighted avg       0.95      0.96      0.95       791
 ```
 
+### Regressor Model
+
+The regressor model is a simple linear regression model that uses the pre-trained roberta-base model to predict the relevance score of a post.
+
+```
+Regressor Test Results Summary:
+Total samples tested: 60
+Overall accuracy: 80.00%
+Irrelevant samples accuracy: 73.33% (22/30)
+Relevant samples accuracy: 86.67% (26/30)
+
+Classification Metrics:
+Precision: 0.7647
+Recall: 0.8667
+F1 Score: 0.8125
+
+Regression Metrics:
+Mean Squared Error (MSE): 0.4112
+R-squared (R²): -0.6447
+
+Confusion Matrix:
+True Positives: 26
+False Positives: 8
+True Negatives: 22
+False Negatives: 4
+```
+
 ## Running the API Server
 
 ### Using Docker Compose (Recommended)
