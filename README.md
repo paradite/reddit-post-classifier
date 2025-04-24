@@ -1,6 +1,6 @@
 # Reddit Post Classifier
 
-This project is a simple classifier for Reddit posts. It uses a pre-trained model to classify posts as relevant or irrelevant.
+This project is a simple classifier for Reddit posts. It uses pre-trained models to classify posts as relevant or irrelevant.
 
 Created by [16x Tracker](https://tracker.16x.engineer/)
 
@@ -8,9 +8,9 @@ Created by [16x Tracker](https://tracker.16x.engineer/)
 
 ## System Requirements
 
-- Minimum 1GB RAM (2GB recommended)
+- Minimum 2GB RAM (4GB recommended)
 - Docker and Docker Compose installed
-- About 500MB disk space for the model and dependencies
+- About 1GB disk space for the models and dependencies
 
 ## Sample Results
 
@@ -167,6 +167,8 @@ python api-server.py
 
 ## Making API Requests
 
+The API now provides results from both a classifier model and a regressor model. The classifier model provides a binary classification (relevant/not relevant) with confidence, while the regressor model provides a continuous score with a threshold-based classification.
+
 ### Single Post Classification
 
 Make a request to classify a single post:
@@ -176,13 +178,37 @@ curl -X POST -H "Content-Type: application/json" \
   -d '{"content":"Your reddit post content goes here."}' \
   http://localhost:8080
 
-# {"relevant": false, "confidence": 0.9925305247306824}
+# {
+#   "classifier": {
+#     "relevant": false,
+#     "confidence": 0.9962770342826843
+#   },
+#   "regressor": {
+#     "score": 0.07391319423913956,
+#     "is_relevant": true,
+#     "threshold": 0.05
+#   },
+#   "relevant": false,
+#   "confidence": 0.9962770342826843
+# }
 
 curl -X POST -H "Content-Type: application/json" \
   -d '{"content":"putting the question into a file, scheduling the launch, open project, paste the question and have Claude write the answer in a file"}' \
   http://localhost:8080
 
-# {"relevant": true, "confidence": 0.6180585026741028}
+# {
+#   "classifier": {
+#     "relevant": true,
+#     "confidence": 0.6180585026741028
+#   },
+#   "regressor": {
+#     "score": 0.6180585026741028,
+#     "is_relevant": true,
+#     "threshold": 0.05
+#   },
+#   "relevant": true,
+#   "confidence": 0.6180585026741028
+# }
 ```
 
 ### Bulk Post Classification
@@ -200,11 +226,68 @@ curl -X POST -H "Content-Type: application/json" \
 
 # {
 #   "results": [
-#     {"relevant": false, "confidence": 0.9925305247306824},
-#     {"relevant": true, "confidence": 0.6180585026741028},
-#     {"relevant": false, "confidence": 0.9876543210987654}
+#     {
+#       "classifier": {
+#         "relevant": false,
+#         "confidence": 0.996539831161499
+#       },
+#       "regressor": {
+#         "score": 0.07639118283987045,
+#         "is_relevant": true,
+#         "threshold": 0.05
+#       },
+#       "relevant": false,
+#       "confidence": 0.996539831161499
+#     },
+#     {
+#       "classifier": {
+#         "relevant": false,
+#         "confidence": 0.9960152506828308
+#       },
+#       "regressor": {
+#         "score": 0.0750168040394783,
+#         "is_relevant": true,
+#         "threshold": 0.05
+#       },
+#       "relevant": false,
+#       "confidence": 0.9960152506828308
+#     },
+#     {
+#       "classifier": {
+#         "relevant": false,
+#         "confidence": 0.9955819249153137
+#       },
+#       "regressor": {
+#         "score": 0.07426447421312332,
+#         "is_relevant": true,
+#         "threshold": 0.05
+#       },
+#       "relevant": false,
+#       "confidence": 0.9955819249153137
+#     }
 #   ]
 # }
 ```
 
 If you submit more than 10 posts, the API will return a 400 error with a message indicating the maximum batch size has been exceeded.
+
+## Understanding the API Response
+
+The API now returns results from both models:
+
+1. **Classifier Model**:
+
+   - `relevant`: Boolean indicating if the post is classified as relevant (true) or not relevant (false)
+   - `confidence`: Confidence score of the classification (0.0 to 1.0)
+
+2. **Regressor Model**:
+
+   - `score`: Continuous relevance score (0.0 to 1.0)
+   - `is_relevant`: Boolean indicating if the score is above the threshold (0.05)
+   - `threshold`: The threshold value used for classification (0.05)
+
+3. **Legacy Fields** (for backward compatibility):
+   - `relevant`: Same as classifier.relevant
+   - `confidence`: Same as classifier.confidence
+
+The regressor model provides a more nuanced view of relevance with its continuous score, while the classifier provides a binary classification with confidence.
