@@ -176,13 +176,15 @@ def train_model(model, train_loader, val_loader, epochs=10, patience=3, project_
             
             # For regression, we use MSE loss
             logits = outputs.logits.squeeze()
+            # Apply sigmoid to get 0-1 range
+            predictions = torch.sigmoid(logits)
             loss_fct = torch.nn.MSELoss()
-            loss = loss_fct(logits, labels)
+            loss = loss_fct(predictions, labels)
             
             train_loss += loss.item()
             
             # Store predictions and true values for metrics
-            train_predictions.extend(logits.detach().cpu().numpy())
+            train_predictions.extend(predictions.detach().cpu().numpy())
             train_true.extend(labels.cpu().numpy())
             
             loss.backward()
@@ -226,11 +228,13 @@ def train_model(model, train_loader, val_loader, epochs=10, patience=3, project_
                 )
                 
                 logits = outputs.logits.squeeze()
+                # Apply sigmoid to get 0-1 range
+                predictions = torch.sigmoid(logits)
                 loss_fct = torch.nn.MSELoss()
-                loss = loss_fct(logits, labels)
+                loss = loss_fct(predictions, labels)
                 
                 val_loss += loss.item()
-                val_predictions.extend(logits.cpu().numpy())
+                val_predictions.extend(predictions.cpu().numpy())
                 val_true.extend(labels.cpu().numpy())
             
             # Print validation progress
@@ -301,7 +305,8 @@ def predict_relevance_score(new_posts, model, tokenizer, device, threshold=0.5):
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             logits = outputs.logits.squeeze()
-            score = torch.sigmoid(logits).cpu().numpy()[0]  # Apply sigmoid to get 0-1 range
+            # Apply sigmoid to get 0-1 range
+            score = torch.sigmoid(logits).cpu().numpy()[0]
             # Determine binary classification based on threshold
             is_relevant = score >= threshold
         
@@ -344,6 +349,7 @@ def predict_folder(folder_path, model, tokenizer, device, threshold=0.5):
 
 # Function to find optimal threshold
 def find_optimal_threshold(val_predictions, val_true):
+    # val_predictions are already sigmoid-applied (0-1 range)
     thresholds = np.arange(0.1, 0.9, 0.05)
     best_f1 = 0
     best_threshold = 0.5
