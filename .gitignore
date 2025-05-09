@@ -32,3 +32,6 @@ docs/classifier-server.md
 *.log
 log.txt
 regressor_test_results/
+
+# queries
+queries.sql
