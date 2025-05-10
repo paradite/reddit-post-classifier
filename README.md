@@ -150,6 +150,49 @@ True Negatives: 22
 False Negatives: 4
 ```
 
+### URL Regressor Model
+
+The URL regressor model is a simple linear regression model that uses the pre-trained roberta-base model to predict the relevance score of a post. URL is added as prefix to the post content. The data used is from April 2025.
+
+Model weights: `best_url_regressor_run1_epoch_5.pt`
+Optimal threshold: 0.1500
+
+```
+================================================================================
+REGRESSOR MODEL TEST RESULTS - 2025-05-10 16:37:48
+================================================================================
+
+Optimal threshold: 0.1500
+
+================================================================================
+TESTING 30 RANDOM IRRELEVANT SAMPLES
+================================================================================
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total samples tested: 60
+Overall accuracy: 81.67%
+Irrelevant samples accuracy: 73.33% (22/30)
+Relevant samples accuracy: 90.00% (27/30)
+
+Classification Metrics:
+Precision: 0.7714
+Recall: 0.9000
+F1 Score: 0.8308
+
+Regression Metrics:
+Mean Squared Error (MSE): 0.2690
+R-squared (R²): -0.0762
+
+Confusion Matrix:
+True Positives: 27
+False Positives: 8
+True Negatives: 22
+False Negatives: 3
+```
+
 ## Running the API Server
 
 ### Using Docker Compose (Recommended)
