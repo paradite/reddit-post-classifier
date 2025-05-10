@@ -58,28 +58,18 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_t
             # Filter by timestamp if specified
             if timestamp_threshold is not None:
                 timestamp_str = row.get('timestamp', '')
-                # print(f"Timestamp: {timestamp_str}")
                 if timestamp_str:
                     try:
-                        # Parse the timestamp string (format: 2025-04-03 19:02:55+00)
-                        # The format in the CSV is '2025-01-06 17:51:58+00' which doesn't match '%Y-%m-%d %H:%M:%S%z'
-                        # We need to handle the timezone part differently
                         if '+' in timestamp_str:
-                            # Split the timestamp and timezone parts
                             base_timestamp, tz = timestamp_str.split('+')
-                            # Parse the base timestamp
                             item_timestamp = datetime.strptime(base_timestamp, '%Y-%m-%d %H:%M:%S')
                         else:
-                            # If no timezone info, just parse the timestamp
                             item_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
-                        
-                        # print(f"Item timestamp: {item_timestamp}")
                         
                         if item_timestamp < timestamp_threshold:
                             timestamp_filtered_count += 1
                             continue
                     except (ValueError, TypeError) as e:
-                        # Skip if timestamp can't be parsed
                         print(f"Error parsing timestamp: {timestamp_str}")
                         print(f"Error type: {type(timestamp_str)}")
                         print(f"Error message: {e}")
@@ -91,8 +81,11 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_t
                 team_filtered_count += 1
                 continue
             
-            # Filter out posts containing "F5Bot"
+            # Get content and URL
             content = str(row.get('content', ''))
+            url = str(row.get('url', ''))
+            
+            # Filter out posts containing "F5Bot"
             if "F5Bot" in content:
                 f5bot_filtered_count += 1
                 continue
@@ -117,9 +110,11 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_t
                 # Determine output directory
                 output_dir = status_dirs[status]
                 
-                # Write content to file
+                # Write content to file with URL prepended
                 output_path = os.path.join(output_dir, final_filename)
                 with open(output_path, 'w', encoding='utf-8') as f:
+                    if url:
+                        f.write(f"{url}\n\n")
                     f.write(content)
                 
                 # Update status counter
@@ -156,8 +151,7 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_t
 
 if __name__ == "__main__":
     # Path to CSV file
-    # csv_path = "hits.csv"
-    csv_path = "Supabase Snippet Retrieve Tracking Hits for Team 1.csv"
+    csv_path = "Supabase Snippet Retrieve Tracking Hits for Team 1 April.csv"
     
     # Team ID to filter by (set to None to process all teams)
     team_id_filter = 1
