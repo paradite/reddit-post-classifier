@@ -157,6 +157,21 @@ The URL regressor model is a simple linear regression model that uses the pre-tr
 Model weights: `best_url_regressor_run1_epoch_5.pt`
 Optimal threshold: 0.1500
 
+URL prefix logic sample:
+
+```py
+output_path = 'sample_url_prefix.txt'
+url = 'https://www.google.com'
+content = 'This is a test post'
+
+with open(output_path, 'w', encoding='utf-8') as f:
+   if url:
+      f.write(f"{url}\n\n")
+   f.write(content)
+```
+
+Results:
+
 ```
 ================================================================================
 REGRESSOR MODEL TEST RESULTS - 2025-05-10 16:37:48
