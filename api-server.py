@@ -278,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             
             results.append(result)
             text_time = time.time() - text_start_time
-            logging.info(f"Item {i+1}/{len(items)}: Classifier: {'relevant' if classifier_pred == 1 else 'not relevant'} (confidence: {classifier_conf:.2f}), Regressor: {'relevant' if regressor_is_relevant else 'not relevant'} (score: {regressor_score:.4f}, time: {text_time:.3f}s)")
+            logging.info(f"Item {i+1}/{len(items)}: C:{'Y' if classifier_pred == 1 else 'N'}({classifier_conf:.2f}) R:{'Y' if regressor_is_relevant else 'N'}({regressor_score:.4f})" + (f" U:{'Y' if url_regressor_result['is_relevant'] else 'N'}({url_regressor_result['score']:.4f})" if url_regressor_result else "") + f" t:{text_time:.3f}s")
 
         # For backward compatibility, if it was a single content request, return the same format
         if 'content' in data:
