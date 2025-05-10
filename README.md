@@ -252,113 +252,185 @@ python api-server.py
 
 ## Making API Requests
 
-The API now provides results from both a classifier model and a regressor model. The classifier model provides a binary classification (relevant/not relevant) with confidence, while the regressor model provides a continuous score with a threshold-based classification.
+The API provides results from three models:
+
+1. Classifier model: Binary classification (relevant/not relevant) with confidence
+2. Regressor model: Continuous score with threshold-based classification
+3. URL Regressor model: Continuous score with threshold-based classification, using URL-prefixed text
 
 ### Single Post Classification
 
 Make a request to classify a single post:
 
 ```bash
+# Basic request (without URL)
 curl -X POST -H "Content-Type: application/json" \
   -d '{"content":"Your reddit post content goes here."}' \
   http://localhost:8080
+```
 
-# {
-#   "classifier": {
-#     "relevant": false,
-#     "confidence": 0.9962770342826843
-#   },
-#   "regressor": {
-#     "score": 0.07391319423913956,
-#     "is_relevant": true,
-#     "threshold": 0.05
-#   },
-#   "relevant": false,
-#   "confidence": 0.9962770342826843
-# }
+Response:
 
+```json
+{
+  "classifier": {
+    "relevant": false,
+    "confidence": 0.9935186505317688
+  },
+  "regressor": {
+    "score": 0.11482210457324982,
+    "is_relevant": true,
+    "threshold": 0.05
+  },
+  "relevant": false,
+  "confidence": 0.9935186505317688
+}
+```
+
+```bash
+# Request with URL (for URL regressor model)
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"content":"putting the question into a file, scheduling the launch, open project, paste the question and have Claude write the answer in a file"}' \
+  -d '{
+    "content": "Your reddit post content goes here.",
+    "url": "https://www.reddit.com/r/example/post/123"
+  }' \
   http://localhost:8080
+```
 
-# {
-#   "classifier": {
-#     "relevant": true,
-#     "confidence": 0.6180585026741028
-#   },
-#   "regressor": {
-#     "score": 0.6180585026741028,
-#     "is_relevant": true,
-#     "threshold": 0.05
-#   },
-#   "relevant": true,
-#   "confidence": 0.6180585026741028
-# }
+Response:
+
+```json
+{
+  "classifier": {
+    "relevant": false,
+    "confidence": 0.995292067527771
+  },
+  "regressor": {
+    "score": 0.1207122877240181,
+    "is_relevant": true,
+    "threshold": 0.05
+  },
+  "url_regressor": {
+    "score": 0.11297155916690826,
+    "is_relevant": false,
+    "threshold": 0.15
+  },
+  "relevant": false,
+  "confidence": 0.995292067527771
+}
 ```
 
 ### Bulk Post Classification
 
-You can also classify multiple posts at once (up to 10 posts per request):
+You can classify multiple posts at once (up to 10 posts per request). The API supports two formats:
+
+1. Array of dictionaries (recommended):
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"contents": [
-    "Your first reddit post content goes here.",
-    "Your second reddit post content goes here.",
-    "Your third reddit post content goes here."
-  ]}' \
+  -d '{
+    "contents": [
+      {
+        "content": "Your first reddit post content goes here.",
+        "url": "https://www.reddit.com/r/example/post/123"
+      },
+      {
+        "content": "Your second reddit post content goes here.",
+        "url": "https://www.reddit.com/r/example/post/456"
+      }
+    ]
+  }' \
   http://localhost:8080
-
-# {
-#   "results": [
-#     {
-#       "classifier": {
-#         "relevant": false,
-#         "confidence": 0.996539831161499
-#       },
-#       "regressor": {
-#         "score": 0.07639118283987045,
-#         "is_relevant": true,
-#         "threshold": 0.05
-#       },
-#       "relevant": false,
-#       "confidence": 0.996539831161499
-#     },
-#     {
-#       "classifier": {
-#         "relevant": false,
-#         "confidence": 0.9960152506828308
-#       },
-#       "regressor": {
-#         "score": 0.0750168040394783,
-#         "is_relevant": true,
-#         "threshold": 0.05
-#       },
-#       "relevant": false,
-#       "confidence": 0.9960152506828308
-#     },
-#     {
-#       "classifier": {
-#         "relevant": false,
-#         "confidence": 0.9955819249153137
-#       },
-#       "regressor": {
-#         "score": 0.07426447421312332,
-#         "is_relevant": true,
-#         "threshold": 0.05
-#       },
-#       "relevant": false,
-#       "confidence": 0.9955819249153137
-#     }
-#   ]
-# }
 ```
 
-If you submit more than 10 posts, the API will return a 400 error with a message indicating the maximum batch size has been exceeded.
+Response:
 
-## Understanding the API Response
+```json
+{
+  "results": [
+    {
+      "classifier": {
+        "relevant": false,
+        "confidence": 0.9935186505317688
+      },
+      "regressor": {
+        "score": 0.11482210457324982,
+        "is_relevant": true,
+        "threshold": 0.05
+      },
+      "url_regressor": {
+        "score": 0.12649774551391602,
+        "is_relevant": false,
+        "threshold": 0.15
+      },
+      "relevant": false,
+      "confidence": 0.9935186505317688
+    },
+    {
+      "classifier": {
+        "relevant": false,
+        "confidence": 0.9967260360717773
+      },
+      "regressor": {
+        "score": 0.07994376122951508,
+        "is_relevant": true,
+        "threshold": 0.05
+      },
+      "url_regressor": {
+        "score": 0.10774697363376617,
+        "is_relevant": false,
+        "threshold": 0.15
+      },
+      "relevant": false,
+      "confidence": 0.9967260360717773
+    }
+  ]
+}
+```
 
-The API now returns results from both models:
+2. Separate arrays (legacy format):
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      "Your first reddit post content goes here.",
+      "Your second reddit post content goes here."
+    ],
+    "urls": [
+      "https://www.reddit.com/r/example/post/123",
+      "https://www.reddit.com/r/example/post/456"
+    ]
+  }' \
+  http://localhost:8080
+```
+
+Response format is identical to the array of dictionaries format
+
+If you submit more than 10 posts, the API will return a 400 error:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {"content": "test1"}, {"content": "test2"}, {"content": "test3"},
+      {"content": "test4"}, {"content": "test5"}, {"content": "test6"},
+      {"content": "test7"}, {"content": "test8"}, {"content": "test9"},
+      {"content": "test10"}, {"content": "test11"}
+    ]
+  }' \
+  http://localhost:8080
+```
+
+Response:
+
+```json
+{
+  "error": "Request exceeded maximum batch size of 10. Received 11 items."
+}
+```
+
+## Understanding the Response Fields
 
 1. **Classifier Model**:
 
@@ -371,8 +443,14 @@ The API now returns results from both models:
    - `is_relevant`: Boolean indicating if the score is above the threshold (0.05)
    - `threshold`: The threshold value used for classification (0.05)
 
-3. **Legacy Fields** (for backward compatibility):
+3. **URL Regressor Model** (only included when URL is provided):
+
+   - `score`: Continuous relevance score (0.0 to 1.0)
+   - `is_relevant`: Boolean indicating if the score is above the threshold (0.15)
+   - `threshold`: The threshold value used for classification (0.15)
+
+4. **Legacy Fields** (for backward compatibility):
    - `relevant`: Same as classifier.relevant
    - `confidence`: Same as classifier.confidence
 
-The regressor model provides a more nuanced view of relevance with its continuous score, while the classifier provides a binary classification with confidence.
+Note: The URL regressor model processes the text with the URL prefixed (e.g., "https://www.reddit.com/r/example/post/123\n\nYour post content"), while the classifier and regressor models process the text without the URL prefix. This matches how each model was trained.
