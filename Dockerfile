@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r api-requirements.txt
 # Copy the model files and server code
 COPY best_model_run12_epoch_9.pt .
 COPY best_regressor_run1_epoch_4.pt .
+COPY best_url_regressor_run1_epoch_5.pt .
 COPY api-server.py .
 
 # Expose the port the server runs on
