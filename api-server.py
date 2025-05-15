@@ -160,41 +160,27 @@ class Handler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            # Handle both single content and bulk content
-            if 'content' in data:
-                items = [{
-                    'content': data.get('content', ''),
-                    'url': data.get('url', '')
-                }]
-                logging.info("Processing single content request")
-            elif 'contents' in data:
-                if isinstance(data['contents'], list):
-                    if all(isinstance(item, dict) for item in data['contents']):
-                        items = data['contents']
-                    else:
-                        items = [{
-                            'content': content,
-                            'url': url
-                        } for content, url in zip(
-                            data['contents'],
-                            data.get('urls', [''] * len(data['contents']))
-                        )]
-                else:
-                    raise ValueError("'contents' must be a list")
-                
-                if len(items) > MAX_BATCH_SIZE:
-                    error_msg = f"Request exceeded maximum batch size of {MAX_BATCH_SIZE}. Received {len(items)} items."
-                    logging.error(error_msg)
+            # Handle bulk content
+            if 'contents' in data:
+                if not isinstance(data['contents'], list):
                     self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({"error": error_msg}).encode('utf-8'))
                     model_manager.end_request()
                     return
                 
+                if len(data['contents']) > MAX_BATCH_SIZE:
+                    self.send_response(400)
+                    self.end_headers()
+                    model_manager.end_request()
+                    return
+                
+                items = data['contents']
                 logging.info(f"Processing bulk request with {len(items)} items")
             else:
-                raise ValueError("Request must contain either 'content' or 'contents' field")
+                self.send_response(400)
+                self.end_headers()
+                model_manager.end_request()
+                return
                 
             logging.info(f"Received request with {len(items)} item(s)")
         except Exception as e:
