@@ -1,5 +1,5 @@
 # Dependencies for running the API server only
 # These are minimal requirements needed to serve the model
-torch>=2.0.0
+torch>=2.0.0+cpu
 transformers>=4.28.0
 psutil>=5.9.0
