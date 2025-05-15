@@ -328,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
         model_manager.end_request()
 
 def run():
-    server_address = ('0.0.0.0', 8080)
+    server_address = ('0.0.0.0', 9092)
     httpd = HTTPServer(server_address, Handler)
     logging.info(f"Server started on {server_address[0]}:{server_address[1]}")
     httpd.serve_forever()
