@@ -157,6 +157,19 @@ curl -X POST -H "Content-Type: application/json" \
   http://localhost:8080
 ```
 
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {"content": "test1"}, {"content": "test2"}, {"content": "test3"},
+      {"content": "test4"}, {"content": "test5"}, {"content": "test6"},
+      {"content": "test7"}, {"content": "test8"}, {"content": "test9"},
+      {"content": "test10"}
+    ]
+  }' \
+  http://localhost:8080
+```
+
 Response format is identical to the array of dictionaries format
 
 If you submit more than 10 posts, the API will return a 400 error:
