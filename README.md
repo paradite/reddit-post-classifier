@@ -239,7 +239,7 @@ docker build -t reddit-post-classifier .
 Run the container:
 
 ```bash
-docker run -p 8080:8080 reddit-post-classifier
+docker run -p 9092:9092 reddit-post-classifier
 ```
 
 ### Without Docker

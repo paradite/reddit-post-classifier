@@ -18,7 +18,7 @@ Make a request to classify a single post:
 # Basic request (without URL)
 curl -X POST -H "Content-Type: application/json" \
   -d '{"content":"Your reddit post content goes here."}' \
-  http://localhost:8080
+  http://localhost:9092
 ```
 
 Response:
@@ -46,7 +46,7 @@ curl -X POST -H "Content-Type: application/json" \
     "content": "Your reddit post content goes here.",
     "url": "https://www.reddit.com/r/example/post/123"
   }' \
-  http://localhost:8080
+  http://localhost:9092
 ```
 
 Response:
@@ -92,7 +92,7 @@ curl -X POST -H "Content-Type: application/json" \
       }
     ]
   }' \
-  http://localhost:8080
+  http://localhost:9092
 ```
 
 Response:
@@ -140,23 +140,6 @@ Response:
 }
 ```
 
-2. Separate arrays (legacy format):
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{
-    "contents": [
-      "Your first reddit post content goes here.",
-      "Your second reddit post content goes here."
-    ],
-    "urls": [
-      "https://www.reddit.com/r/example/post/123",
-      "https://www.reddit.com/r/example/post/456"
-    ]
-  }' \
-  http://localhost:8080
-```
-
 ```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{
@@ -167,7 +150,7 @@ curl -X POST -H "Content-Type: application/json" \
       {"content": "test10"}
     ]
   }' \
-  http://localhost:8080
+  http://localhost:9092
 ```
 
 Response format is identical to the array of dictionaries format
@@ -184,7 +167,7 @@ curl -X POST -H "Content-Type: application/json" \
       {"content": "test10"}, {"content": "test11"}
     ]
   }' \
-  http://localhost:8080
+  http://localhost:9092
 ```
 
 Response:

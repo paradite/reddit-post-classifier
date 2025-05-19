@@ -22,7 +22,7 @@ COPY best_url_regressor_run1_epoch_5.pt .
 COPY api-server.py .
 
 # Expose the port the server runs on
-EXPOSE 8080
+EXPOSE 9092
 
 # Command to run the server
 CMD ["python", "api-server.py"] 
