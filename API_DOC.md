@@ -10,68 +10,6 @@ The API provides results from three models:
 2. Regressor model: Continuous score with threshold-based classification
 3. URL Regressor model: Continuous score with threshold-based classification, using URL-prefixed text
 
-### Single Post Classification
-
-Make a request to classify a single post:
-
-```bash
-# Basic request (without URL)
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"content":"Your reddit post content goes here."}' \
-  http://localhost:9092
-```
-
-Response:
-
-```json
-{
-  "classifier": {
-    "relevant": false,
-    "confidence": 0.9935186505317688
-  },
-  "regressor": {
-    "score": 0.11482210457324982,
-    "is_relevant": true,
-    "threshold": 0.05
-  },
-  "relevant": false,
-  "confidence": 0.9935186505317688
-}
-```
-
-```bash
-# Request with URL (for URL regressor model)
-curl -X POST -H "Content-Type: application/json" \
-  -d '{
-    "content": "Your reddit post content goes here.",
-    "url": "https://www.reddit.com/r/example/post/123"
-  }' \
-  http://localhost:9092
-```
-
-Response:
-
-```json
-{
-  "classifier": {
-    "relevant": false,
-    "confidence": 0.995292067527771
-  },
-  "regressor": {
-    "score": 0.1207122877240181,
-    "is_relevant": true,
-    "threshold": 0.05
-  },
-  "url_regressor": {
-    "score": 0.11297155916690826,
-    "is_relevant": false,
-    "threshold": 0.15
-  },
-  "relevant": false,
-  "confidence": 0.995292067527771
-}
-```
-
 ### Bulk Post Classification
 
 You can classify multiple posts at once (up to 10 posts per request). The API supports two formats:
