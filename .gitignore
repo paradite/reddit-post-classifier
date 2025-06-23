@@ -33,6 +33,7 @@ docs/classifier-server.md
 log.txt
 regressor_test_results/
 url_regressor_test_results/
+model_comparison_results/*.txt
 
 # queries
 queries.sql
