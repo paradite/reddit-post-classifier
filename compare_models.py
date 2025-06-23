@@ -261,7 +261,7 @@ def evaluate_model(model, tokenizer, device, samples: List[Dict], model_type: st
     
     for sample in samples:
         # Determine true label based on folder
-        true_label = RELEVANT_LABEL if 'relevant' in sample.get('folder', '') else IRRELEVANT_LABEL
+        true_label = RELEVANT_LABEL if sample.get('folder', '') == 'relevant' else IRRELEVANT_LABEL
         true_labels.append(true_label)
         
         if model_type == 'classifier':
@@ -353,6 +353,7 @@ def main():
         url_regressor_scores.append(result['score'])
     
     url_regressor_threshold = find_optimal_threshold(url_regressor_scores, true_labels)
+    
     
     # Evaluate all models on separate evaluation data
     logger.info("Evaluating classifier model on evaluation data...")
