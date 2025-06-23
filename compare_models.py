@@ -5,21 +5,28 @@ import random
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import StratifiedKFold
 import logging
 import datetime
 from typing import Dict, List, Tuple
+from collections import Counter
 
 # Configuration
-NUM_SAMPLES = 100  # Number of samples to load from each category (split 50/50 for tuning/evaluation)
+NUM_SAMPLES = 200  # Larger sample size for more robust evaluation
 MODEL_NAME = "roberta-base"
 IRRELEVANT_FOLDER = "irrelevant_posts"
 RELEVANT_FOLDER = "relevant_posts"
 OUTPUT_DIR = "model_comparison_results"
+N_FOLDS = 5  # For cross-validation
 
 # Model paths
 CLASSIFIER_MODEL_PATH = "best_model_run12_epoch_9.pt"
 REGRESSOR_MODEL_PATH = "best_regressor_run1_epoch_4.pt"
 URL_REGRESSOR_MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"
+
+# API server thresholds for comparison
+API_REGRESSOR_THRESHOLD = 0.05
+API_URL_REGRESSOR_THRESHOLD = 0.15
 
 # Set up logging
 logging.basicConfig(
@@ -34,14 +41,14 @@ IRRELEVANT_LABEL = 0
 RELEVANT_LABEL = 1
 
 class RegressionHead(torch.nn.Module):
-    """Custom regression head for regressor models"""
+    """Custom regression head for regressor models - matches API server exactly"""
     def __init__(self, config):
         super().__init__()
         self.dense = torch.nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
         self.out_proj = torch.nn.Linear(config.hidden_size, 1)
 
-    def forward(self, features):
+    def forward(self, features, **kwargs):  # Match API server signature
         x = features[:, 0, :]  # Take <s> token (equiv. to [CLS])
         x = self.dropout(x)
         x = self.dense(x)
@@ -51,14 +58,14 @@ class RegressionHead(torch.nn.Module):
         return x
 
 def load_classifier_model(model_path: str) -> Tuple[torch.nn.Module, AutoTokenizer, torch.device]:
-    """Load the classifier model"""
+    """Load the classifier model - matches API server loading"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
     model.to(device)
     
-    # Load state dict with compatibility handling
+    # Load state dict with compatibility handling - matches API server
     state_dict = torch.load(model_path, map_location=device)
     filtered_state_dict = {}
     for key, value in state_dict.items():
@@ -76,7 +83,7 @@ def load_classifier_model(model_path: str) -> Tuple[torch.nn.Module, AutoTokeniz
     return model, tokenizer, device
 
 def load_regressor_model(model_path: str) -> Tuple[torch.nn.Module, AutoTokenizer, torch.device]:
-    """Load a regressor model"""
+    """Load a regressor model - matches API server loading"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -84,7 +91,7 @@ def load_regressor_model(model_path: str) -> Tuple[torch.nn.Module, AutoTokenize
     model.classifier = RegressionHead(model.config)
     model.to(device)
     
-    # Load state dict with compatibility handling
+    # Load state dict with compatibility handling - matches API server
     state_dict = torch.load(model_path, map_location=device)
     filtered_state_dict = {}
     for key, value in state_dict.items():
@@ -127,7 +134,8 @@ def predict_classifier(post: str, model, tokenizer, device) -> Dict:
     return {
         'prediction': prediction,
         'confidence': float(confidence),
-        'is_relevant': bool(prediction == RELEVANT_LABEL)
+        'is_relevant': bool(prediction == RELEVANT_LABEL),
+        'probabilities': probabilities[0].cpu().numpy().tolist()
     }
 
 def predict_regressor(post: str, model, tokenizer, device, threshold: float = 0.5) -> Dict:
@@ -160,13 +168,18 @@ def predict_regressor(post: str, model, tokenizer, device, threshold: float = 0.
     return {
         'score': float(score),
         'is_relevant': bool(is_relevant),
-        'threshold': threshold
+        'threshold': threshold,
+        'raw_logits': float(logits.cpu().numpy())
     }
 
 def get_random_samples(folder_path: str, num_samples: int = 5) -> List[Dict]:
     """Get random samples from a folder"""
     files = glob.glob(os.path.join(folder_path, "*.txt"))
-    selected_files = random.sample(files, min(num_samples, len(files)))
+    if len(files) < num_samples:
+        logger.warning(f"Only {len(files)} files available in {folder_path}, requested {num_samples}")
+        num_samples = len(files)
+    
+    selected_files = random.sample(files, num_samples)
     
     samples = []
     for filepath in selected_files:
@@ -190,9 +203,10 @@ def get_random_samples(folder_path: str, num_samples: int = 5) -> List[Dict]:
     
     return samples
 
-def find_optimal_threshold(scores: List[float], true_labels: List[int]) -> float:
+def find_optimal_threshold(scores: List[float], true_labels: List[int], threshold_range: Tuple[float, float] = (0.01, 0.99)) -> Tuple[float, float]:
     """Find the optimal threshold that maximizes F1 score"""
-    thresholds = np.arange(0.01, 0.99, 0.01)
+    start_thresh, end_thresh = threshold_range
+    thresholds = np.arange(start_thresh, end_thresh, 0.01)
     best_f1 = 0
     best_threshold = 0.5
     
@@ -211,7 +225,7 @@ def find_optimal_threshold(scores: List[float], true_labels: List[int]) -> float
             best_f1 = f1
             best_threshold = threshold
     
-    return best_threshold
+    return best_threshold, best_f1
 
 def calculate_metrics(predictions: List[int], true_labels: List[int]) -> Dict:
     """Calculate classification metrics"""
@@ -236,55 +250,92 @@ def calculate_metrics(predictions: List[int], true_labels: List[int]) -> Dict:
         'fn': fn
     }
 
-def evaluate_model(model, tokenizer, device, samples: List[Dict], model_type: str, threshold: float = None) -> Dict:
-    """Evaluate a single model on the given samples"""
-    predictions = []
-    scores = []
-    true_labels = []
+def cross_validate_model(model, tokenizer, device, samples: List[Dict], model_type: str, threshold: float = None, n_folds: int = 5) -> Dict:
+    """Perform cross-validation on the model"""
+    # Prepare data
+    X = samples
+    y = [RELEVANT_LABEL if sample['folder'] == 'relevant' else IRRELEVANT_LABEL for sample in samples]
     
-    for sample in samples:
-        # Determine true label based on folder
-        true_label = RELEVANT_LABEL if 'relevant' in sample.get('folder', '') else IRRELEVANT_LABEL
-        true_labels.append(true_label)
+    # Stratified K-Fold
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+    
+    fold_results = []
+    all_predictions = []
+    all_true_labels = []
+    all_scores = []
+    
+    for fold, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+        logger.info(f"Processing fold {fold + 1}/{n_folds}")
         
-        if model_type == 'classifier':
-            result = predict_classifier(sample['content'], model, tokenizer, device)
-            predictions.append(result['prediction'])
-            scores.append(result['confidence'])
-        else:  # regressor
-            result = predict_regressor(sample['content'], model, tokenizer, device, threshold or 0.5)
-            predictions.append(1 if result['is_relevant'] else 0)
-            scores.append(result['score'])
+        test_samples = [X[i] for i in test_idx]
+        test_labels = [y[i] for i in test_idx]
+        
+        fold_predictions = []
+        fold_scores = []
+        
+        for sample in test_samples:
+            if model_type == 'classifier':
+                result = predict_classifier(sample['content'], model, tokenizer, device)
+                fold_predictions.append(result['prediction'])
+                fold_scores.append(result['confidence'])
+            else:  # regressor
+                result = predict_regressor(sample['content'], model, tokenizer, device, threshold or 0.5)
+                fold_predictions.append(1 if result['is_relevant'] else 0)
+                fold_scores.append(result['score'])
+        
+        # Calculate fold metrics
+        fold_metrics = calculate_metrics(fold_predictions, test_labels)
+        fold_results.append(fold_metrics)
+        
+        # Accumulate for overall metrics
+        all_predictions.extend(fold_predictions)
+        all_true_labels.extend(test_labels)
+        all_scores.extend(fold_scores)
     
-    # Calculate metrics
-    metrics = calculate_metrics(predictions, true_labels)
+    # Calculate overall metrics
+    overall_metrics = calculate_metrics(all_predictions, all_true_labels)
+    
+    # Calculate mean and std across folds
+    fold_f1s = [result['f1'] for result in fold_results]
+    fold_accuracies = [result['accuracy'] for result in fold_results]
     
     # Add regression metrics for regressor models
     if model_type != 'classifier':
-        mse = mean_squared_error(true_labels, scores)
-        r2 = r2_score(true_labels, scores)
-        metrics['mse'] = mse
-        metrics['r2'] = r2
+        mse = mean_squared_error(all_true_labels, all_scores)
+        r2 = r2_score(all_true_labels, all_scores)
+        overall_metrics['mse'] = mse
+        overall_metrics['r2'] = r2
     
     return {
-        'metrics': metrics,
-        'predictions': predictions,
-        'scores': scores,
-        'true_labels': true_labels,
+        'overall_metrics': overall_metrics,
+        'fold_results': fold_results,
+        'mean_f1': np.mean(fold_f1s),
+        'std_f1': np.std(fold_f1s),
+        'mean_accuracy': np.mean(fold_accuracies),
+        'std_accuracy': np.std(fold_accuracies),
+        'all_predictions': all_predictions,
+        'all_scores': all_scores,
+        'all_true_labels': all_true_labels,
         'threshold': threshold
     }
 
 def main():
-    logger.info("Starting model comparison...")
+    logger.info("Starting robust model comparison with cross-validation...")
+    
+    # Set random seeds for reproducibility
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
     
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Generate output filename with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = os.path.join(OUTPUT_DIR, f"model_comparison_{timestamp}.txt")
+    output_file = os.path.join(OUTPUT_DIR, f"robust_model_comparison_{timestamp}.txt")
     
     # Get test samples
+    logger.info(f"Loading {NUM_SAMPLES} samples from each category...")
     irrelevant_samples = get_random_samples(IRRELEVANT_FOLDER, NUM_SAMPLES)
     relevant_samples = get_random_samples(RELEVANT_FOLDER, NUM_SAMPLES)
     
@@ -294,179 +345,193 @@ def main():
     for sample in relevant_samples:
         sample['folder'] = 'relevant'
     
-    # Split data into threshold tuning and evaluation sets (50/50 split)
-    tuning_size = NUM_SAMPLES // 2
-    
-    tuning_irrelevant = irrelevant_samples[:tuning_size]
-    tuning_relevant = relevant_samples[:tuning_size] 
-    tuning_samples = tuning_irrelevant + tuning_relevant
-    
-    eval_irrelevant = irrelevant_samples[tuning_size:]
-    eval_relevant = relevant_samples[tuning_size:]
-    eval_samples = eval_irrelevant + eval_relevant
-    
-    logger.info(f"Data split: {len(tuning_samples)} samples for threshold tuning, {len(eval_samples)} samples for evaluation")
+    all_samples = irrelevant_samples + relevant_samples
+    logger.info(f"Total samples: {len(all_samples)} ({len(irrelevant_samples)} irrelevant, {len(relevant_samples)} relevant)")
     
     # Load models
-    logger.info("Loading classifier model...")
+    logger.info("Loading models...")
     classifier_model, classifier_tokenizer, device = load_classifier_model(CLASSIFIER_MODEL_PATH)
-    
-    logger.info("Loading regressor model...")
     regressor_model, regressor_tokenizer, _ = load_regressor_model(REGRESSOR_MODEL_PATH)
-    
-    logger.info("Loading URL regressor model...")
     url_regressor_model, url_regressor_tokenizer, _ = load_regressor_model(URL_REGRESSOR_MODEL_PATH)
     
-    # Find optimal thresholds using tuning data
-    logger.info("Finding optimal threshold for regressor model using tuning data...")
-    regressor_scores = []
-    true_labels = []
-    for sample in tuning_samples:
+    # Debug: Check score distributions
+    logger.info("Analyzing score distributions...")
+    debug_scores = {'regressor': [], 'url_regressor': []}
+    debug_labels = []
+    
+    for sample in all_samples[:20]:  # Sample 20 for debugging
         true_label = RELEVANT_LABEL if sample['folder'] == 'relevant' else IRRELEVANT_LABEL
-        true_labels.append(true_label)
-        result = predict_regressor(sample['content'], regressor_model, regressor_tokenizer, device, 0.5)
-        regressor_scores.append(result['score'])
+        debug_labels.append(true_label)
+        
+        reg_result = predict_regressor(sample['content'], regressor_model, regressor_tokenizer, device, 0.5)
+        url_reg_result = predict_regressor(sample['content'], url_regressor_model, url_regressor_tokenizer, device, 0.5)
+        
+        debug_scores['regressor'].append(reg_result['score'])
+        debug_scores['url_regressor'].append(url_reg_result['score'])
+        
+        logger.debug(f"Sample {sample['filename'][:20]}: true={true_label}, reg_score={reg_result['score']:.4f}, url_reg_score={url_reg_result['score']:.4f}")
     
-    regressor_threshold = find_optimal_threshold(regressor_scores, true_labels)
-    logger.info(f"Optimal regressor threshold: {regressor_threshold:.4f}")
+    logger.info(f"Debug score ranges - Regressor: {min(debug_scores['regressor']):.4f} to {max(debug_scores['regressor']):.4f}")
+    logger.info(f"Debug score ranges - URL Regressor: {min(debug_scores['url_regressor']):.4f} to {max(debug_scores['url_regressor']):.4f}")
     
-    logger.info("Finding optimal threshold for URL regressor model using tuning data...")
-    url_regressor_scores = []
-    for sample in tuning_samples:
-        result = predict_regressor(sample['content'], url_regressor_model, url_regressor_tokenizer, device, 0.5)
-        url_regressor_scores.append(result['score'])
+    # Find optimal thresholds using a subset
+    threshold_samples = all_samples[:100]  # Use subset for threshold finding
     
-    url_regressor_threshold = find_optimal_threshold(url_regressor_scores, true_labels)
-    logger.info(f"Optimal URL regressor threshold: {url_regressor_threshold:.4f}")
+    logger.info("Finding optimal thresholds...")
+    reg_scores = []
+    url_reg_scores = []
+    threshold_labels = []
     
-    # Evaluate all models on separate evaluation data
-    logger.info("Evaluating classifier model on evaluation data...")
-    classifier_results = evaluate_model(classifier_model, classifier_tokenizer, device, eval_samples, 'classifier')
+    for sample in threshold_samples:
+        true_label = RELEVANT_LABEL if sample['folder'] == 'relevant' else IRRELEVANT_LABEL
+        threshold_labels.append(true_label)
+        
+        reg_result = predict_regressor(sample['content'], regressor_model, regressor_tokenizer, device, 0.5)
+        url_reg_result = predict_regressor(sample['content'], url_regressor_model, url_regressor_tokenizer, device, 0.5)
+        
+        reg_scores.append(reg_result['score'])
+        url_reg_scores.append(url_reg_result['score'])
     
-    logger.info("Evaluating regressor model with optimal threshold on evaluation data...")
-    regressor_results = evaluate_model(regressor_model, regressor_tokenizer, device, eval_samples, 'regressor', regressor_threshold)
+    optimal_reg_threshold, optimal_reg_f1 = find_optimal_threshold(reg_scores, threshold_labels)
+    optimal_url_threshold, optimal_url_f1 = find_optimal_threshold(url_reg_scores, threshold_labels)
     
-    logger.info("Evaluating URL regressor model with optimal threshold on evaluation data...")
-    url_regressor_results = evaluate_model(url_regressor_model, url_regressor_tokenizer, device, eval_samples, 'url_regressor', url_regressor_threshold)
+    logger.info(f"Optimal regressor threshold: {optimal_reg_threshold:.4f} (F1: {optimal_reg_f1:.4f})")
+    logger.info(f"Optimal URL regressor threshold: {optimal_url_threshold:.4f} (F1: {optimal_url_f1:.4f})")
+    logger.info(f"API regressor threshold: {API_REGRESSOR_THRESHOLD} (for comparison)")
+    logger.info(f"API URL regressor threshold: {API_URL_REGRESSOR_THRESHOLD} (for comparison)")
+    
+    # Perform cross-validation
+    logger.info("Performing cross-validation...")
+    classifier_cv_results = cross_validate_model(classifier_model, classifier_tokenizer, device, all_samples, 'classifier', n_folds=N_FOLDS)
+    regressor_cv_results = cross_validate_model(regressor_model, regressor_tokenizer, device, all_samples, 'regressor', optimal_reg_threshold, n_folds=N_FOLDS)
+    url_regressor_cv_results = cross_validate_model(url_regressor_model, url_regressor_tokenizer, device, all_samples, 'url_regressor', optimal_url_threshold, n_folds=N_FOLDS)
+    
+    # Also test with API thresholds
+    regressor_api_cv_results = cross_validate_model(regressor_model, regressor_tokenizer, device, all_samples, 'regressor', API_REGRESSOR_THRESHOLD, n_folds=N_FOLDS)
+    url_regressor_api_cv_results = cross_validate_model(url_regressor_model, url_regressor_tokenizer, device, all_samples, 'url_regressor', API_URL_REGRESSOR_THRESHOLD, n_folds=N_FOLDS)
     
     # Write results to file
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write("="*80 + "\n")
-        f.write(f"MODEL COMPARISON RESULTS - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"ROBUST MODEL COMPARISON RESULTS - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("="*80 + "\n\n")
         
         f.write(f"Test Configuration:\n")
-        f.write(f"- Total samples loaded per category: {NUM_SAMPLES}\n")
-        f.write(f"- Threshold tuning samples: {len(tuning_samples)} ({len(tuning_irrelevant)} irrelevant, {len(tuning_relevant)} relevant)\n")
-        f.write(f"- Evaluation samples: {len(eval_samples)} ({len(eval_irrelevant)} irrelevant, {len(eval_relevant)} relevant)\n")
-        f.write(f"- Data split: 50% for threshold optimization, 50% for unbiased evaluation\n\n")
+        f.write(f"- Total samples: {len(all_samples)} ({len(irrelevant_samples)} irrelevant, {len(relevant_samples)} relevant)\n")
+        f.write(f"- Cross-validation folds: {N_FOLDS}\n")
+        f.write(f"- Evaluation method: Stratified K-Fold Cross-Validation\n\n")
+        
+        f.write("Threshold Analysis:\n")
+        f.write(f"- Optimal regressor threshold: {optimal_reg_threshold:.4f} (F1: {optimal_reg_f1:.4f})\n")
+        f.write(f"- Optimal URL regressor threshold: {optimal_url_threshold:.4f} (F1: {optimal_url_f1:.4f})\n")
+        f.write(f"- API regressor threshold: {API_REGRESSOR_THRESHOLD}\n")
+        f.write(f"- API URL regressor threshold: {API_URL_REGRESSOR_THRESHOLD}\n\n")
         
         f.write("="*80 + "\n")
-        f.write("MODEL PERFORMANCE COMPARISON\n")
+        f.write("CROSS-VALIDATION RESULTS\n")
         f.write("="*80 + "\n\n")
         
         # Classifier results
-        f.write("1. CLASSIFIER MODEL (best_model_run12_epoch_9.pt)\n")
-        f.write("-" * 50 + "\n")
-        metrics = classifier_results['metrics']
-        f.write(f"Accuracy: {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)\n")
-        f.write(f"Precision: {metrics['precision']:.4f}\n")
-        f.write(f"Recall: {metrics['recall']:.4f}\n")
-        f.write(f"F1 Score: {metrics['f1']:.4f}\n")
+        f.write("1. CLASSIFIER MODEL\n")
+        f.write("-" * 30 + "\n")
+        metrics = classifier_cv_results['overall_metrics']
+        f.write(f"Mean Accuracy: {classifier_cv_results['mean_accuracy']:.4f} ± {classifier_cv_results['std_accuracy']:.4f}\n")
+        f.write(f"Mean F1 Score: {classifier_cv_results['mean_f1']:.4f} ± {classifier_cv_results['std_f1']:.4f}\n")
+        f.write(f"Overall Precision: {metrics['precision']:.4f}\n")
+        f.write(f"Overall Recall: {metrics['recall']:.4f}\n")
         f.write("Confusion Matrix:\n")
-        f.write(f"  True Positives (TP): {metrics['tp']} - Correctly predicted as relevant\n")
-        f.write(f"  False Positives (FP): {metrics['fp']} - Incorrectly predicted as relevant (actually irrelevant)\n")
-        f.write(f"  True Negatives (TN): {metrics['tn']} - Correctly predicted as irrelevant\n")
-        f.write(f"  False Negatives (FN): {metrics['fn']} - Incorrectly predicted as irrelevant (actually relevant)\n\n")
+        f.write(f"  TP: {metrics['tp']}, FP: {metrics['fp']}, TN: {metrics['tn']}, FN: {metrics['fn']}\n\n")
         
-        # Regressor results
-        f.write("2. REGRESSOR MODEL (best_regressor_run1_epoch_4.pt)\n")
-        f.write("-" * 50 + "\n")
-        metrics = regressor_results['metrics']
-        f.write(f"Optimal Threshold: {regressor_results['threshold']:.4f}\n")
-        f.write(f"Accuracy: {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)\n")
-        f.write(f"Precision: {metrics['precision']:.4f}\n")
-        f.write(f"Recall: {metrics['recall']:.4f}\n")
-        f.write(f"F1 Score: {metrics['f1']:.4f}\n")
+        # Regressor results (optimal threshold)
+        f.write("2. REGRESSOR MODEL (Optimal Threshold)\n")
+        f.write("-" * 40 + "\n")
+        metrics = regressor_cv_results['overall_metrics']
+        f.write(f"Threshold: {regressor_cv_results['threshold']:.4f}\n")
+        f.write(f"Mean Accuracy: {regressor_cv_results['mean_accuracy']:.4f} ± {regressor_cv_results['std_accuracy']:.4f}\n")
+        f.write(f"Mean F1 Score: {regressor_cv_results['mean_f1']:.4f} ± {regressor_cv_results['std_f1']:.4f}\n")
+        f.write(f"Overall Precision: {metrics['precision']:.4f}\n")
+        f.write(f"Overall Recall: {metrics['recall']:.4f}\n")
         f.write(f"MSE: {metrics['mse']:.4f}\n")
         f.write(f"R²: {metrics['r2']:.4f}\n")
         f.write("Confusion Matrix:\n")
-        f.write(f"  True Positives (TP): {metrics['tp']} - Correctly predicted as relevant\n")
-        f.write(f"  False Positives (FP): {metrics['fp']} - Incorrectly predicted as relevant (actually irrelevant)\n")
-        f.write(f"  True Negatives (TN): {metrics['tn']} - Correctly predicted as irrelevant\n")
-        f.write(f"  False Negatives (FN): {metrics['fn']} - Incorrectly predicted as irrelevant (actually relevant)\n\n")
+        f.write(f"  TP: {metrics['tp']}, FP: {metrics['fp']}, TN: {metrics['tn']}, FN: {metrics['fn']}\n\n")
         
-        # URL Regressor results
-        f.write("3. URL REGRESSOR MODEL (best_url_regressor_run1_epoch_5.pt)\n")
-        f.write("-" * 50 + "\n")
-        metrics = url_regressor_results['metrics']
-        f.write(f"Optimal Threshold: {url_regressor_results['threshold']:.4f}\n")
-        f.write(f"Accuracy: {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)\n")
-        f.write(f"Precision: {metrics['precision']:.4f}\n")
-        f.write(f"Recall: {metrics['recall']:.4f}\n")
-        f.write(f"F1 Score: {metrics['f1']:.4f}\n")
+        # Regressor results (API threshold)
+        f.write("3. REGRESSOR MODEL (API Threshold)\n")
+        f.write("-" * 35 + "\n")
+        metrics = regressor_api_cv_results['overall_metrics']
+        f.write(f"Threshold: {regressor_api_cv_results['threshold']:.4f}\n")
+        f.write(f"Mean Accuracy: {regressor_api_cv_results['mean_accuracy']:.4f} ± {regressor_api_cv_results['std_accuracy']:.4f}\n")
+        f.write(f"Mean F1 Score: {regressor_api_cv_results['mean_f1']:.4f} ± {regressor_api_cv_results['std_f1']:.4f}\n")
+        f.write(f"Overall Precision: {metrics['precision']:.4f}\n")
+        f.write(f"Overall Recall: {metrics['recall']:.4f}\n")
         f.write(f"MSE: {metrics['mse']:.4f}\n")
         f.write(f"R²: {metrics['r2']:.4f}\n")
         f.write("Confusion Matrix:\n")
-        f.write(f"  True Positives (TP): {metrics['tp']} - Correctly predicted as relevant\n")
-        f.write(f"  False Positives (FP): {metrics['fp']} - Incorrectly predicted as relevant (actually irrelevant)\n")
-        f.write(f"  True Negatives (TN): {metrics['tn']} - Correctly predicted as irrelevant\n")
-        f.write(f"  False Negatives (FN): {metrics['fn']} - Incorrectly predicted as irrelevant (actually relevant)\n\n")
+        f.write(f"  TP: {metrics['tp']}, FP: {metrics['fp']}, TN: {metrics['tn']}, FN: {metrics['fn']}\n\n")
+        
+        # URL Regressor results (optimal threshold)
+        f.write("4. URL REGRESSOR MODEL (Optimal Threshold)\n")
+        f.write("-" * 44 + "\n")
+        metrics = url_regressor_cv_results['overall_metrics']
+        f.write(f"Threshold: {url_regressor_cv_results['threshold']:.4f}\n")
+        f.write(f"Mean Accuracy: {url_regressor_cv_results['mean_accuracy']:.4f} ± {url_regressor_cv_results['std_accuracy']:.4f}\n")
+        f.write(f"Mean F1 Score: {url_regressor_cv_results['mean_f1']:.4f} ± {url_regressor_cv_results['std_f1']:.4f}\n")
+        f.write(f"Overall Precision: {metrics['precision']:.4f}\n")
+        f.write(f"Overall Recall: {metrics['recall']:.4f}\n")
+        f.write(f"MSE: {metrics['mse']:.4f}\n")
+        f.write(f"R²: {metrics['r2']:.4f}\n")
+        f.write("Confusion Matrix:\n")
+        f.write(f"  TP: {metrics['tp']}, FP: {metrics['fp']}, TN: {metrics['tn']}, FN: {metrics['fn']}\n\n")
+        
+        # URL Regressor results (API threshold)
+        f.write("5. URL REGRESSOR MODEL (API Threshold)\n")
+        f.write("-" * 39 + "\n")
+        metrics = url_regressor_api_cv_results['overall_metrics']
+        f.write(f"Threshold: {url_regressor_api_cv_results['threshold']:.4f}\n")
+        f.write(f"Mean Accuracy: {url_regressor_api_cv_results['mean_accuracy']:.4f} ± {url_regressor_api_cv_results['std_accuracy']:.4f}\n")
+        f.write(f"Mean F1 Score: {url_regressor_api_cv_results['mean_f1']:.4f} ± {url_regressor_api_cv_results['std_f1']:.4f}\n")
+        f.write(f"Overall Precision: {metrics['precision']:.4f}\n")
+        f.write(f"Overall Recall: {metrics['recall']:.4f}\n")
+        f.write(f"MSE: {metrics['mse']:.4f}\n")
+        f.write(f"R²: {metrics['r2']:.4f}\n")
+        f.write("Confusion Matrix:\n")
+        f.write(f"  TP: {metrics['tp']}, FP: {metrics['fp']}, TN: {metrics['tn']}, FN: {metrics['fn']}\n\n")
         
         # Summary comparison
         f.write("="*80 + "\n")
         f.write("SUMMARY COMPARISON\n")
         f.write("="*80 + "\n\n")
         
-        models = [
-            ("Classifier", classifier_results['metrics']),
-            ("Regressor", regressor_results['metrics']),
-            ("URL Regressor", url_regressor_results['metrics'])
+        results = [
+            ("Classifier", classifier_cv_results),
+            ("Regressor (Optimal)", regressor_cv_results),
+            ("Regressor (API)", regressor_api_cv_results),
+            ("URL Regressor (Optimal)", url_regressor_cv_results),
+            ("URL Regressor (API)", url_regressor_api_cv_results)
         ]
         
-        f.write(f"{'Model':<15} {'Accuracy':<10} {'Precision':<10} {'Recall':<10} {'F1 Score':<10}\n")
-        f.write("-" * 60 + "\n")
-        for name, metrics in models:
-            f.write(f"{name:<15} {metrics['accuracy']:.4f}    {metrics['precision']:.4f}     {metrics['recall']:.4f}     {metrics['f1']:.4f}\n")
-        
-        # Best performing model
-        f.write("\n" + "="*80 + "\n")
-        f.write("BEST PERFORMING MODEL\n")
-        f.write("="*80 + "\n\n")
-        
-        best_f1 = max(classifier_results['metrics']['f1'], regressor_results['metrics']['f1'], url_regressor_results['metrics']['f1'])
-        if classifier_results['metrics']['f1'] == best_f1:
-            f.write("Best Model: CLASSIFIER MODEL\n")
-            f.write(f"Best F1 Score: {best_f1:.4f}\n")
-        elif regressor_results['metrics']['f1'] == best_f1:
-            f.write("Best Model: REGRESSOR MODEL\n")
-            f.write(f"Best F1 Score: {best_f1:.4f}\n")
-            f.write(f"Optimal Threshold: {regressor_results['threshold']:.4f}\n")
-        else:
-            f.write("Best Model: URL REGRESSOR MODEL\n")
-            f.write(f"Best F1 Score: {best_f1:.4f}\n")
-            f.write(f"Optimal Threshold: {url_regressor_results['threshold']:.4f}\n")
+        f.write(f"{'Model':<25} {'Mean F1':<15} {'Std F1':<15} {'Mean Accuracy':<15}\n")
+        f.write("-" * 75 + "\n")
+        for name, result in results:
+            f.write(f"{name:<25} {result['mean_f1']:.4f} ± {result['std_f1']:.4f}  {result['mean_accuracy']:.4f} ± {result['std_accuracy']:.4f}\n")
     
     # Print summary to console
-    print("\n" + "="*60)
-    print("MODEL COMPARISON SUMMARY")
-    print("="*60)
-    print(f"{'Model':<15} {'Accuracy':<10} {'F1 Score':<10} {'Threshold':<10}")
-    print("-" * 50)
-    print(f"{'Classifier':<15} {classifier_results['metrics']['accuracy']:.4f}    {classifier_results['metrics']['f1']:.4f}     {'N/A':<10}")
-    print(f"{'Regressor':<15} {regressor_results['metrics']['accuracy']:.4f}    {regressor_results['metrics']['f1']:.4f}     {regressor_results['threshold']:.4f}")
-    print(f"{'URL Regressor':<15} {url_regressor_results['metrics']['accuracy']:.4f}    {url_regressor_results['metrics']['f1']:.4f}     {url_regressor_results['threshold']:.4f}")
+    print("\n" + "="*80)
+    print("ROBUST MODEL COMPARISON SUMMARY")
+    print("="*80)
+    print(f"{'Model':<25} {'Mean F1':<15} {'Mean Accuracy':<15}")
+    print("-" * 60)
+    for name, result in results:
+        print(f"{name:<25} {result['mean_f1']:.4f} ± {result['std_f1']:.4f}  {result['mean_accuracy']:.4f} ± {result['std_accuracy']:.4f}")
     
-    best_f1 = max(classifier_results['metrics']['f1'], regressor_results['metrics']['f1'], url_regressor_results['metrics']['f1'])
-    if classifier_results['metrics']['f1'] == best_f1:
-        print(f"\nBest Model: CLASSIFIER (F1: {best_f1:.4f})")
-    elif regressor_results['metrics']['f1'] == best_f1:
-        print(f"\nBest Model: REGRESSOR (F1: {best_f1:.4f}, Threshold: {regressor_results['threshold']:.4f})")
-    else:
-        print(f"\nBest Model: URL REGRESSOR (F1: {best_f1:.4f}, Threshold: {url_regressor_results['threshold']:.4f})")
+    # Find best model
+    best_f1 = max(result['mean_f1'] for _, result in results)
+    best_model = next(name for name, result in results if result['mean_f1'] == best_f1)
+    print(f"\nBest Model: {best_model} (Mean F1: {best_f1:.4f})")
     
     print(f"\nDetailed results saved to: {output_file}")
-    logger.info(f"Model comparison completed. Results saved to {output_file}")
+    logger.info(f"Robust model comparison completed. Results saved to {output_file}")
 
 if __name__ == "__main__":
     main()
