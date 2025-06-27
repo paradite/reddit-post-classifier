@@ -20,6 +20,7 @@ OUTPUT_DIR = "model_comparison_results"
 CLASSIFIER_MODEL_PATH = "best_model_run12_epoch_9.pt"
 REGRESSOR_MODEL_PATH = "best_regressor_run1_epoch_4.pt"
 URL_REGRESSOR_MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"
+URL_REGRESSOR_MAY_2025_MODEL_PATH = "reddit-url-regressor-may-2025_run1_epoch_6.pt"
 
 # API thresholds for comparison
 API_REGRESSOR_THRESHOLD = 0.05
@@ -333,6 +334,7 @@ def main():
     classifier_model, classifier_tokenizer, device = load_classifier_model(CLASSIFIER_MODEL_PATH)
     regressor_model, regressor_tokenizer, _ = load_regressor_model(REGRESSOR_MODEL_PATH)
     url_regressor_model, url_regressor_tokenizer, _ = load_regressor_model(URL_REGRESSOR_MODEL_PATH)
+    url_regressor_may_2025_model, url_regressor_may_2025_tokenizer, _ = load_regressor_model(URL_REGRESSOR_MAY_2025_MODEL_PATH)
     
     # Find optimal thresholds using tuning data
     logger.info("Finding optimal threshold for regressor model using tuning data...")
@@ -354,6 +356,13 @@ def main():
     
     url_regressor_threshold = find_optimal_threshold(url_regressor_scores, true_labels)
     
+    logger.info("Finding optimal threshold for URL regressor May 2025 model using tuning data...")
+    url_regressor_may_2025_scores = []
+    for sample in tuning_samples:
+        result = predict_regressor(sample['content'], url_regressor_may_2025_model, url_regressor_may_2025_tokenizer, device, 0.5)
+        url_regressor_may_2025_scores.append(result['score'])
+    
+    url_regressor_may_2025_threshold = find_optimal_threshold(url_regressor_may_2025_scores, true_labels)
     
     # Evaluate all models on separate evaluation data
     logger.info("Evaluating classifier model on evaluation data...")
@@ -371,6 +380,12 @@ def main():
     logger.info("Evaluating URL regressor model with API threshold on evaluation data...")
     url_regressor_api_results = evaluate_model(url_regressor_model, url_regressor_tokenizer, device, eval_samples, 'url_regressor', API_URL_REGRESSOR_THRESHOLD)
     
+    logger.info("Evaluating URL regressor May 2025 model with optimal threshold on evaluation data...")
+    url_regressor_may_2025_results = evaluate_model(url_regressor_may_2025_model, url_regressor_may_2025_tokenizer, device, eval_samples, 'url_regressor', url_regressor_may_2025_threshold)
+    
+    logger.info("Evaluating URL regressor May 2025 model with API threshold on evaluation data...")
+    url_regressor_may_2025_api_results = evaluate_model(url_regressor_may_2025_model, url_regressor_may_2025_tokenizer, device, eval_samples, 'url_regressor', API_URL_REGRESSOR_THRESHOLD)
+    
     # Write results to file
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write("="*80 + "\n")
@@ -385,6 +400,7 @@ def main():
         f.write("Threshold Analysis:\n")
         f.write(f"- Optimal regressor threshold: {regressor_threshold:.4f}\n")
         f.write(f"- Optimal URL regressor threshold: {url_regressor_threshold:.4f}\n")
+        f.write(f"- Optimal URL regressor May 2025 threshold: {url_regressor_may_2025_threshold:.4f}\n")
         f.write(f"- API regressor threshold: {API_REGRESSOR_THRESHOLD}\n")
         f.write(f"- API URL regressor threshold: {API_URL_REGRESSOR_THRESHOLD}\n\n")
         
@@ -398,7 +414,9 @@ def main():
             ("Regressor (Optimal)", regressor_results),
             ("Regressor (API)", regressor_api_results),
             ("URL Regressor (Optimal)", url_regressor_results),
-            ("URL Regressor (API)", url_regressor_api_results)
+            ("URL Regressor (API)", url_regressor_api_results),
+            ("URL Regressor May 2025 (Optimal)", url_regressor_may_2025_results),
+            ("URL Regressor May 2025 (API)", url_regressor_may_2025_api_results)
         ]
         
         for i, (name, results) in enumerate(models, 1):
@@ -449,11 +467,11 @@ def main():
     print("\n" + "="*80)
     print("MODEL COMPARISON SUMMARY")
     print("="*80)
-    print(f"{'Model':<25} {'Accuracy':<10} {'F1 Score':<10} {'Threshold':<10}")
+    print(f"{'Model':<35} {'Accuracy':<10} {'F1 Score':<10} {'Threshold':<10}")
     print("-" * 60)
     for name, results in models:
         threshold_str = f"{results['threshold']:.4f}" if results.get('threshold') is not None else "N/A"
-        print(f"{name:<25} {results['metrics']['accuracy']:.4f}    {results['metrics']['f1']:.4f}     {threshold_str}")
+        print(f"{name:<35} {results['metrics']['accuracy']:.4f}    {results['metrics']['f1']:.4f}     {threshold_str}")
     
     best_f1 = max(results['metrics']['f1'] for _, results in models)
     best_model = next(name for name, results in models if results['metrics']['f1'] == best_f1)
