@@ -447,11 +447,12 @@ def main():
         f.write("SUMMARY COMPARISON\n")
         f.write("="*80 + "\n\n")
         
-        f.write(f"{'Model':<25} {'Accuracy':<10} {'Precision':<10} {'Recall':<10} {'F1 Score':<10}\n")
-        f.write("-" * 75 + "\n")
+        f.write(f"{'Model':<35} {'Accuracy':<10} {'Precision':<10} {'Recall':<10} {'F1 Score':<10} {'Threshold':<10}\n")
+        f.write("-" * 95 + "\n")
         for name, results in models:
             metrics = results['metrics']
-            f.write(f"{name:<25} {metrics['accuracy']:.4f}    {metrics['precision']:.4f}     {metrics['recall']:.4f}     {metrics['f1']:.4f}\n")
+            threshold_str = f"{results['threshold']:.4f}" if results.get('threshold') is not None else "N/A"
+            f.write(f"{name:<35} {metrics['accuracy']:.4f}    {metrics['precision']:.4f}     {metrics['recall']:.4f}     {metrics['f1']:.4f}     {threshold_str}\n")
         
         # Best performing model
         f.write("\n" + "="*80 + "\n")
@@ -467,11 +468,11 @@ def main():
     print("\n" + "="*80)
     print("MODEL COMPARISON SUMMARY")
     print("="*80)
-    print(f"{'Model':<35} {'Accuracy':<10} {'F1 Score':<10} {'Threshold':<10}")
-    print("-" * 60)
+    print(f"{'Model':<35} {'Accuracy':<10} {'Precision':<10} {'Recall':<10} {'F1 Score':<10} {'Threshold':<10}")
+    print("-" * 95)
     for name, results in models:
         threshold_str = f"{results['threshold']:.4f}" if results.get('threshold') is not None else "N/A"
-        print(f"{name:<35} {results['metrics']['accuracy']:.4f}    {results['metrics']['f1']:.4f}     {threshold_str}")
+        print(f"{name:<35} {results['metrics']['accuracy']:.4f}    {results['metrics']['precision']:.4f}     {results['metrics']['recall']:.4f}     {results['metrics']['f1']:.4f}     {threshold_str}")
     
     best_f1 = max(results['metrics']['f1'] for _, results in models)
     best_model = next(name for name, results in models if results['metrics']['f1'] == best_f1)
