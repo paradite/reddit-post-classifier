@@ -14,15 +14,15 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Constants
-# MODEL_PATH = "reddit_topic_classifier_run3.pt"
-CLASSIFIER_MODEL_PATH = "best_model_run12_epoch_9.pt"
-REGRESSOR_MODEL_PATH = "best_regressor_run1_epoch_4.pt"
+# Constants - Top 3 performing models
+URL_REGRESSOR_MAY_2025_MODEL_PATH = "reddit-url-regressor-may-2025_run1_epoch_6.pt"
 URL_REGRESSOR_MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"
-MODEL_NAME = "roberta-base"  # Changed from distilbert-base-uncased to roberta-base
+MODEL_NAME = "roberta-base"
 MAX_BATCH_SIZE = 10
-THRESHOLD = 0.05  # Threshold for regressor model
-URL_THRESHOLD = 0.15  # Threshold for URL regressor model
+# Thresholds based on model comparison results
+URL_MAY_2025_API_THRESHOLD = 0.15  # Best performing model at API threshold
+URL_MAY_2025_OPTIMAL_THRESHOLD = 0.0342  # Best performing model at optimal threshold
+URL_REGRESSOR_OPTIMAL_THRESHOLD = 0.1203  # Third best model at optimal threshold
 
 def get_memory_usage():
     process = psutil.Process(os.getpid())
@@ -40,14 +40,14 @@ class ModelManager:
         logging.info(f"Initializing ModelManager with device: {self.device}")
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self.models: Dict[str, Optional[torch.nn.Module]] = {
-            'classifier': None,
-            'regressor': None,
-            'url_regressor': None
+            'url_regressor_may_2025': None,
+            'url_regressor_may_2025_optimal': None,
+            'url_regressor_optimal': None
         }
         self.model_paths = {
-            'classifier': CLASSIFIER_MODEL_PATH,
-            'regressor': REGRESSOR_MODEL_PATH,
-            'url_regressor': URL_REGRESSOR_MODEL_PATH
+            'url_regressor_may_2025': URL_REGRESSOR_MAY_2025_MODEL_PATH,
+            'url_regressor_may_2025_optimal': URL_REGRESSOR_MAY_2025_MODEL_PATH,
+            'url_regressor_optimal': URL_REGRESSOR_MODEL_PATH
         }
         self.active_requests = 0
         logging.info("ModelManager initialized successfully")
@@ -58,11 +58,9 @@ class ModelManager:
             start_time = time.time()
             memory_before = get_memory_usage()
             
-            if model_type == 'classifier':
-                model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
-            else:
-                model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=1)
-                model.classifier = RegressionHead(model.config)
+            # All top 3 models are regression models
+            model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=1)
+            model.classifier = RegressionHead(model.config)
 
             model.to(self.device)
             
@@ -228,89 +226,108 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 url_encodings.append(None)
 
-        # Process all items with classifier model
-        classifier_model = model_manager.load_model('classifier')
-        classifier_results = []
-        for encoding in encodings:
+        # Process all items with top 3 models
+        
+        # 1. URL Regressor May 2025 (API threshold) - Best performing model
+        may_2025_api_model = model_manager.load_model('url_regressor_may_2025')
+        may_2025_api_results = []
+        for i, item in enumerate(items):
+            # Use URL encoding if available, otherwise use regular encoding
+            if url_encodings[i] is not None:
+                _, encoding = url_encodings[i]
+            else:
+                encoding = encodings[i]
+                
             input_ids = torch.tensor(encoding['input_ids']).to(model_manager.device)
             attention_mask = torch.tensor(encoding['attention_mask']).to(model_manager.device)
             
             with torch.no_grad():
-                classifier_output = classifier_model(input_ids=input_ids, attention_mask=attention_mask)
-                classifier_logits = classifier_output.logits
-                classifier_probs = torch.softmax(classifier_logits, dim=1)
-                classifier_pred = int(torch.argmax(classifier_probs, dim=1).item())
-                classifier_conf = classifier_probs[0][classifier_pred].item()
-                classifier_results.append((classifier_pred, classifier_conf))
-        model_manager.unload_model('classifier')
+                output = may_2025_api_model(input_ids=input_ids, attention_mask=attention_mask)
+                logits = output.logits.squeeze()
+                score = torch.sigmoid(logits).cpu().numpy()
+                if isinstance(score, np.ndarray) and score.size > 1:
+                    score = score[0]
+                is_relevant = score >= URL_MAY_2025_API_THRESHOLD
+                may_2025_api_results.append((score, is_relevant))
+        model_manager.unload_model('url_regressor_may_2025')
 
-        # Process all items with regressor model
-        regressor_model = model_manager.load_model('regressor')
-        regressor_results = []
-        for encoding in encodings:
+        # 2. URL Regressor May 2025 (Optimal threshold) - Second best
+        may_2025_optimal_model = model_manager.load_model('url_regressor_may_2025_optimal')
+        may_2025_optimal_results = []
+        for i, item in enumerate(items):
+            # Use URL encoding if available, otherwise use regular encoding
+            if url_encodings[i] is not None:
+                _, encoding = url_encodings[i]
+            else:
+                encoding = encodings[i]
+                
             input_ids = torch.tensor(encoding['input_ids']).to(model_manager.device)
             attention_mask = torch.tensor(encoding['attention_mask']).to(model_manager.device)
             
             with torch.no_grad():
-                regressor_output = regressor_model(input_ids=input_ids, attention_mask=attention_mask)
-                regressor_logits = regressor_output.logits.squeeze()
-                regressor_score = torch.sigmoid(regressor_logits).cpu().numpy()
-                if isinstance(regressor_score, np.ndarray) and regressor_score.size > 1:
-                    regressor_score = regressor_score[0]
-                regressor_is_relevant = regressor_score >= THRESHOLD
-                regressor_results.append((regressor_score, regressor_is_relevant))
-        model_manager.unload_model('regressor')
+                output = may_2025_optimal_model(input_ids=input_ids, attention_mask=attention_mask)
+                logits = output.logits.squeeze()
+                score = torch.sigmoid(logits).cpu().numpy()
+                if isinstance(score, np.ndarray) and score.size > 1:
+                    score = score[0]
+                is_relevant = score >= URL_MAY_2025_OPTIMAL_THRESHOLD
+                may_2025_optimal_results.append((score, is_relevant))
+        model_manager.unload_model('url_regressor_may_2025_optimal')
 
-        # Process all items with URL regressor model if needed
-        url_regressor_results = [None] * len(items)
-        if any(url_enc is not None for url_enc in url_encodings):
-            url_regressor_model = model_manager.load_model('url_regressor')
-            for i, url_encoding in enumerate(url_encodings):
-                if url_encoding is not None:
-                    url, encoding = url_encoding
-                    url_input_ids = torch.tensor(encoding['input_ids']).to(model_manager.device)
-                    url_attention_mask = torch.tensor(encoding['attention_mask']).to(model_manager.device)
-                    
-                    with torch.no_grad():
-                        url_regressor_output = url_regressor_model(input_ids=url_input_ids, attention_mask=url_attention_mask)
-                        url_regressor_logits = url_regressor_output.logits.squeeze()
-                        url_regressor_score = torch.sigmoid(url_regressor_logits).cpu().numpy()
-                        if isinstance(url_regressor_score, np.ndarray) and url_regressor_score.size > 1:
-                            url_regressor_score = url_regressor_score[0]
-                        url_regressor_is_relevant = url_regressor_score >= URL_THRESHOLD
-                        url_regressor_results[i] = {
-                            'score': float(url_regressor_score),
-                            'is_relevant': bool(url_regressor_is_relevant),
-                            'threshold': URL_THRESHOLD
-                        }
-            model_manager.unload_model('url_regressor')
+        # 3. URL Regressor (Optimal threshold) - Third best
+        url_regressor_optimal_model = model_manager.load_model('url_regressor_optimal')
+        url_regressor_optimal_results = []
+        for i, item in enumerate(items):
+            # Use URL encoding if available, otherwise use regular encoding
+            if url_encodings[i] is not None:
+                _, encoding = url_encodings[i]
+            else:
+                encoding = encodings[i]
+                
+            input_ids = torch.tensor(encoding['input_ids']).to(model_manager.device)
+            attention_mask = torch.tensor(encoding['attention_mask']).to(model_manager.device)
+            
+            with torch.no_grad():
+                output = url_regressor_optimal_model(input_ids=input_ids, attention_mask=attention_mask)
+                logits = output.logits.squeeze()
+                score = torch.sigmoid(logits).cpu().numpy()
+                if isinstance(score, np.ndarray) and score.size > 1:
+                    score = score[0]
+                is_relevant = score >= URL_REGRESSOR_OPTIMAL_THRESHOLD
+                url_regressor_optimal_results.append((score, is_relevant))
+        model_manager.unload_model('url_regressor_optimal')
 
-        # Combine results
+        # Combine results from top 3 models
         results = []
         for i in range(len(items)):
-            classifier_pred, classifier_conf = classifier_results[i]
-            regressor_score, regressor_is_relevant = regressor_results[i]
+            may_2025_api_score, may_2025_api_relevant = may_2025_api_results[i]
+            may_2025_optimal_score, may_2025_optimal_relevant = may_2025_optimal_results[i]
+            url_optimal_score, url_optimal_relevant = url_regressor_optimal_results[i]
             
             result = {
-                'classifier': {
-                    'relevant': bool(classifier_pred == 1), 
-                    'confidence': float(classifier_conf)
+                'url_regressor_may_2025_api': {
+                    'score': float(may_2025_api_score),
+                    'is_relevant': bool(may_2025_api_relevant),
+                    'threshold': URL_MAY_2025_API_THRESHOLD
                 },
-                'regressor': {
-                    'score': float(regressor_score),
-                    'is_relevant': bool(regressor_is_relevant),
-                    'threshold': THRESHOLD
+                'url_regressor_may_2025_optimal': {
+                    'score': float(may_2025_optimal_score),
+                    'is_relevant': bool(may_2025_optimal_relevant),
+                    'threshold': URL_MAY_2025_OPTIMAL_THRESHOLD
+                },
+                'url_regressor_optimal': {
+                    'score': float(url_optimal_score),
+                    'is_relevant': bool(url_optimal_relevant),
+                    'threshold': URL_REGRESSOR_OPTIMAL_THRESHOLD
                 }
             }
             
-            if url_regressor_results[i]:
-                result['url_regressor'] = url_regressor_results[i]
-            
-            result['relevant'] = bool(classifier_pred == 1)
-            result['confidence'] = float(classifier_conf)
+            # Use best performing model (May 2025 API) as primary prediction
+            result['relevant'] = bool(may_2025_api_relevant)
+            result['confidence'] = float(may_2025_api_score)
             
             results.append(result)
-            logging.info(f"Item {i+1}/{len(items)}: C:{'Y' if classifier_pred == 1 else 'N'}({classifier_conf:.2f}) R:{'Y' if regressor_is_relevant else 'N'}({regressor_score:.4f})" + (f" U:{'Y' if url_regressor_results[i]['is_relevant'] else 'N'}({url_regressor_results[i]['score']:.4f})" if url_regressor_results[i] else ""))
+            logging.info(f"Item {i+1}/{len(items)}: May2025API:{'Y' if may_2025_api_relevant else 'N'}({may_2025_api_score:.4f}) May2025Opt:{'Y' if may_2025_optimal_relevant else 'N'}({may_2025_optimal_score:.4f}) URLOpt:{'Y' if url_optimal_relevant else 'N'}({url_optimal_score:.4f})")
 
         # For backward compatibility, if it was a single content request, return the same format
         if 'content' in data:
