@@ -81,8 +81,11 @@ start_daemon() {
     echo "Starting health monitor daemon..."
     echo "Log file: $LOG_FILE"
     
-    # Start the monitor in background
-    nohup bash -c "$(declare -f log test_api_health restart_container monitor_health); monitor_health" > /dev/null 2>&1 &
+    # Create the log file if it doesn't exist
+    touch "$LOG_FILE"
+    
+    # Start the monitor in background by re-executing this script with a special flag
+    nohup "$0" --daemon > /dev/null 2>&1 &
     
     # Save PID
     echo $! > "$PID_FILE"
@@ -142,6 +145,10 @@ case "${1:-start}" in
         ;;
     status)
         check_status
+        ;;
+    --daemon)
+        # Special flag to run as daemon
+        monitor_health
         ;;
     *)
         echo "Usage: $0 {start|stop|restart|status}"
