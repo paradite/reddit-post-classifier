@@ -34,9 +34,23 @@ test_api_health() {
 restart_container() {
     log "Restarting hung container..."
     cd "$PROJECT_DIR"
-    docker-compose down >> "$LOG_FILE" 2>&1
+    
+    # Try different docker compose commands
+    if command -v docker-compose >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker-compose"
+    elif docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
+    else
+        log "ERROR: Neither 'docker-compose' nor 'docker compose' found"
+        return 1
+    fi
+    
+    log "Using command: $DOCKER_COMPOSE"
+    log "Working directory: $(pwd)"
+    
+    $DOCKER_COMPOSE down >> "$LOG_FILE" 2>&1
     sleep 5
-    docker-compose up -d >> "$LOG_FILE" 2>&1
+    $DOCKER_COMPOSE up -d >> "$LOG_FILE" 2>&1
     sleep 30  # Wait for startup
     log "Container restart completed"
 }
