@@ -250,6 +250,10 @@ Run the API server directly:
 python api-server.py
 ```
 
+## Training New Models
+
+For detailed instructions on training new models with fresh data, see [TRAINING.md](TRAINING.md).
+
 ## API Documentation
 
 See [API_DOC.md](API_DOC.md) for more details.
