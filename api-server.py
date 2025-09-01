@@ -14,12 +14,14 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Constants - Top 3 performing models
+# Constants - Updated with new Sept 2025 model
+URL_REGRESSOR_SEPT_2025_MODEL_PATH = "reddit-url-regressor-sept-2025_run1_epoch_4.pt"
 URL_REGRESSOR_MAY_2025_MODEL_PATH = "reddit-url-regressor-may-2025_run1_epoch_6.pt"
 URL_REGRESSOR_MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"
 MODEL_NAME = "roberta-base"
 MAX_BATCH_SIZE = 10
 # Thresholds based on model comparison results
+URL_SEPT_2025_OPTIMAL_THRESHOLD = 0.3400  # New Sept 2025 model optimal threshold
 URL_MAY_2025_API_THRESHOLD = 0.15  # Best performing model at API threshold
 URL_MAY_2025_OPTIMAL_THRESHOLD = 0.0342  # Best performing model at optimal threshold
 URL_REGRESSOR_OPTIMAL_THRESHOLD = 0.1203  # Third best model at optimal threshold
@@ -40,11 +42,13 @@ class ModelManager:
         logging.info(f"Initializing ModelManager with device: {self.device}")
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self.models: Dict[str, Optional[torch.nn.Module]] = {
+            'url_regressor_sept_2025': None,
             'url_regressor_may_2025': None,
             'url_regressor_may_2025_optimal': None,
             'url_regressor_optimal': None
         }
         self.model_paths = {
+            'url_regressor_sept_2025': URL_REGRESSOR_SEPT_2025_MODEL_PATH,
             'url_regressor_may_2025': URL_REGRESSOR_MAY_2025_MODEL_PATH,
             'url_regressor_may_2025_optimal': URL_REGRESSOR_MAY_2025_MODEL_PATH,
             'url_regressor_optimal': URL_REGRESSOR_MODEL_PATH
@@ -226,9 +230,32 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 url_encodings.append(None)
 
-        # Process all items with top 3 models
+        # Process all items with top models
         
-        # 1. URL Regressor May 2025 (API threshold) - Best performing model
+        # 1. URL Regressor Sept 2025 - New best performing model
+        sept_2025_model = model_manager.load_model('url_regressor_sept_2025')
+        sept_2025_results = []
+        for i, item in enumerate(items):
+            # Use URL encoding if available, otherwise use regular encoding
+            if url_encodings[i] is not None:
+                _, encoding = url_encodings[i]
+            else:
+                encoding = encodings[i]
+                
+            input_ids = torch.tensor(encoding['input_ids']).to(model_manager.device)
+            attention_mask = torch.tensor(encoding['attention_mask']).to(model_manager.device)
+            
+            with torch.no_grad():
+                output = sept_2025_model(input_ids=input_ids, attention_mask=attention_mask)
+                logits = output.logits.squeeze()
+                score = torch.sigmoid(logits).cpu().numpy()
+                if isinstance(score, np.ndarray) and score.size > 1:
+                    score = score[0]
+                is_relevant = score >= URL_SEPT_2025_OPTIMAL_THRESHOLD
+                sept_2025_results.append((score, is_relevant))
+        model_manager.unload_model('url_regressor_sept_2025')
+        
+        # 2. URL Regressor May 2025 (API threshold) - Legacy model for comparison
         may_2025_api_model = model_manager.load_model('url_regressor_may_2025')
         may_2025_api_results = []
         for i, item in enumerate(items):
@@ -251,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
                 may_2025_api_results.append((score, is_relevant))
         model_manager.unload_model('url_regressor_may_2025')
 
-        # 2. URL Regressor May 2025 (Optimal threshold) - Second best
+        # 3. URL Regressor May 2025 (Optimal threshold) - Legacy comparison
         may_2025_optimal_model = model_manager.load_model('url_regressor_may_2025_optimal')
         may_2025_optimal_results = []
         for i, item in enumerate(items):
@@ -274,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                 may_2025_optimal_results.append((score, is_relevant))
         model_manager.unload_model('url_regressor_may_2025_optimal')
 
-        # 3. URL Regressor (Optimal threshold) - Third best
+        # 4. URL Regressor (Optimal threshold) - Legacy comparison
         url_regressor_optimal_model = model_manager.load_model('url_regressor_optimal')
         url_regressor_optimal_results = []
         for i, item in enumerate(items):
@@ -297,14 +324,20 @@ class Handler(BaseHTTPRequestHandler):
                 url_regressor_optimal_results.append((score, is_relevant))
         model_manager.unload_model('url_regressor_optimal')
 
-        # Combine results from top 3 models
+        # Combine results from all models
         results = []
         for i in range(len(items)):
+            sept_2025_score, sept_2025_relevant = sept_2025_results[i]
             may_2025_api_score, may_2025_api_relevant = may_2025_api_results[i]
             may_2025_optimal_score, may_2025_optimal_relevant = may_2025_optimal_results[i]
             url_optimal_score, url_optimal_relevant = url_regressor_optimal_results[i]
             
             result = {
+                'url_regressor_sept_2025': {
+                    'score': float(sept_2025_score),
+                    'is_relevant': bool(sept_2025_relevant),
+                    'threshold': URL_SEPT_2025_OPTIMAL_THRESHOLD
+                },
                 'url_regressor_may_2025_api': {
                     'score': float(may_2025_api_score),
                     'is_relevant': bool(may_2025_api_relevant),
@@ -322,12 +355,12 @@ class Handler(BaseHTTPRequestHandler):
                 }
             }
             
-            # Use best performing model (May 2025 API) as primary prediction
-            result['relevant'] = bool(may_2025_api_relevant)
-            result['confidence'] = float(may_2025_api_score)
+            # Use new Sept 2025 model as primary prediction
+            result['relevant'] = bool(sept_2025_relevant)
+            result['confidence'] = float(sept_2025_score)
             
             results.append(result)
-            logging.info(f"Item {i+1}/{len(items)}: May2025API:{'Y' if may_2025_api_relevant else 'N'}({may_2025_api_score:.4f}) May2025Opt:{'Y' if may_2025_optimal_relevant else 'N'}({may_2025_optimal_score:.4f}) URLOpt:{'Y' if url_optimal_relevant else 'N'}({url_optimal_score:.4f})")
+            logging.info(f"Item {i+1}/{len(items)}: Sept2025:{'Y' if sept_2025_relevant else 'N'}({sept_2025_score:.4f}) May2025API:{'Y' if may_2025_api_relevant else 'N'}({may_2025_api_score:.4f}) May2025Opt:{'Y' if may_2025_optimal_relevant else 'N'}({may_2025_optimal_score:.4f}) URLOpt:{'Y' if url_optimal_relevant else 'N'}({url_optimal_score:.4f})")
 
         # For backward compatibility, if it was a single content request, return the same format
         if 'content' in data:

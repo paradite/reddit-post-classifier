@@ -87,7 +87,7 @@ python reddit-url-relevance-regressor.py
    - Learning rate scheduling
    - Progress logging every 10 batches
 4. **Model Saving**: Best model saved as `best_url_regressor_run{N}_epoch_{E}.pt`
-5. **Threshold Optimization**: Finds optimal classification threshold (typically ~0.15)
+5. **Threshold Optimization**: Finds optimal classification threshold (varies by training data, recent models use ~0.34)
 
 ## Model Evaluation
 
@@ -99,9 +99,9 @@ python test_regressor.py
 
 Expected performance on balanced test set:
 
-- Overall accuracy: ~81-82%
-- F1 Score: ~0.83
-- Optimal threshold: ~0.15
+- Overall accuracy: ~85%
+- F1 Score: ~0.85
+- Optimal threshold: ~0.34 (varies by model and training data)
 
 ## Key Hyperparameters
 
@@ -140,12 +140,13 @@ Expected performance on balanced test set:
 
 After training, update the production system:
 
-1. Copy the best model file (e.g., `best_url_regressor_run1_epoch_5.pt`) to project root
-2. Update `api-server.py` model path if needed
-3. Rebuild and deploy:
+1. Update `api-server.py` with new model path and optimal threshold
+2. Update `Dockerfile` to include the new model file in COPY commands
+3. Test locally with `./scripts/test-api.sh`
+4. Deploy:
 
 ```bash
 docker compose up --build -d
 ```
 
-The current production model (`best_url_regressor_run1_epoch_5.pt`) uses threshold 0.15 and achieves 81.67% accuracy.
+**Current Production Model**: `reddit-url-regressor-sept-2025_run1_epoch_4.pt` with threshold 0.34, achieving 85% accuracy and F1 Score of 0.8475.
