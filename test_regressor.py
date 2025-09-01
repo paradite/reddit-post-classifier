@@ -11,7 +11,8 @@ import datetime
 # Configuration
 NUM_SAMPLES = 30  # Number of samples to test from each category
 # MODEL_PATH = "best_regressor_run1_epoch_4.pt"  # Update with your actual model path
-MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"  # Update with your actual model path
+# MODEL_PATH = "best_url_regressor_run1_epoch_5.pt"  # Update with your actual model path
+MODEL_PATH = "reddit-url-regressor-sept-2025_run1_epoch_4.pt"  # Update with your actual model path
 MODEL_NAME = "roberta-base"  # Model architecture to use
 IRRELEVANT_FOLDER = "irrelevant_posts"
 RELEVANT_FOLDER = "relevant_posts"
