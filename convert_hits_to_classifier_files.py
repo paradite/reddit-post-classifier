@@ -151,7 +151,7 @@ def process_hits_csv(csv_path, team_id_filter=None, chunk_size=1000, timestamp_t
 
 if __name__ == "__main__":
     # Path to CSV file
-    csv_path = "Supabase Snippet Filter Tracking Hits for Team 1 May.csv"
+    csv_path = "Supabase Snippet Filter Tracking Hits for Team 1 Sept.csv"
     
     # Team ID to filter by (set to None to process all teams)
     team_id_filter = 1
