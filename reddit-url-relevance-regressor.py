@@ -19,7 +19,7 @@ IRRELEVANT_LABEL = 0.0  # Posts that are not relevant to the topic
 RELEVANT_LABEL = 1.0    # Posts that are relevant to the topic
 
 # Define string constants for file naming and project
-PROJECT_NAME = "reddit-url-regressor-may-2025"
+PROJECT_NAME = "reddit-url-regressor-sept-2025"
 MODEL_SAVE_PATH = f"{PROJECT_NAME}_run{RUN_NUMBER}.pt"
 BEST_MODEL_SAVE_PATH = f"{PROJECT_NAME}_run{RUN_NUMBER}_epoch_{{}}.pt"
 
